@@ -4,30 +4,15 @@ import { Platform } from 'react-native';
 
 import { HapticTab } from '@/components/haptic-tab';
 import { IconSymbol } from '@/components/ui/icon-symbol';
+import { CustomTabBar } from '@/components/ui/CustomTabBar';
 import { PerlaColors } from '@/constants/theme';
 
 export default function TabLayout() {
   return (
     <Tabs
+      tabBar={(props) => <CustomTabBar {...props} />}
       screenOptions={{
-        tabBarActiveTintColor: PerlaColors.tertiary,
-        tabBarInactiveTintColor: PerlaColors.onSurfaceVariant,
         headerShown: false,
-        tabBarButton: HapticTab,
-        tabBarStyle: Platform.select({
-          ios: {
-            position: 'absolute',
-            backgroundColor: PerlaColors.surfaceContainerLow + 'CC',
-            borderTopColor: PerlaColors.surfaceContainerHighest + '26',
-            borderTopWidth: 0.5,
-          },
-          default: {
-            backgroundColor: PerlaColors.surfaceContainerLow,
-            borderTopColor: PerlaColors.surfaceContainerHighest + '26',
-            borderTopWidth: 0.5,
-            elevation: 0,
-          },
-        }),
       }}>
       <Tabs.Screen
         name="index"
