@@ -45,7 +45,10 @@ function RootNavigator() {
       }
     } else {
       // Logged in → go to proper role tab group
-      if (inAuthGroup) {
+      // Logged in → ensure they are in their proper role tab group
+      const inGenericTabs = !segments[0] || segments[0] === '(tabs)';
+      
+      if (inAuthGroup || inGenericTabs) {
         // Determine which tab group based on role
         switch (rango) {
           case 'Dev':
