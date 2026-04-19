@@ -20,6 +20,13 @@ const MAPPING = {
   'chevron.right': 'chevron-right',
   'calendar.badge.plus': 'event-available',
   'creditcard.fill': 'account-balance-wallet',
+  // Tab bar icons for role-based navigation
+  'ticket.fill': 'confirmation-number',
+  'gearshape.fill': 'settings',
+  'chart.bar.fill': 'bar-chart',
+  'list.clipboard.fill': 'assignment',
+  'ferry.fill': 'directions-boat',
+  'person.3.fill': 'groups',
 } as IconMapping;
 
 /**

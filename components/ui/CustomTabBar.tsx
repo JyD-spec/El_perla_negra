@@ -1,5 +1,6 @@
 import { BottomTabBarProps } from "@react-navigation/bottom-tabs";
 import { BlurView } from "expo-blur";
+import { useRouter, useSegments } from "expo-router";
 import React, { useCallback, useRef } from "react";
 import {
   Animated,
@@ -293,9 +294,22 @@ export function CustomTabBar({
   descriptors,
   navigation,
 }: BottomTabBarProps) {
+  const router = useRouter();
+  const segments = useSegments();
+
   const handleFabPress = useCallback(() => {
-    console.log("Center Hexagon Action Requested");
-  }, []);
+    const roleSegment = segments[0] as string;
+
+    if (roleSegment === "(tabs-comprador)") {
+      router.push("/(tabs-comprador)/tickets");
+    } else if (roleSegment === "(tabs-caseta)") {
+      router.push("/(tabs-caseta)/trips");
+    } else if (roleSegment === "(tabs-vendedor)") {
+      router.push("/(tabs-vendedor)" as any);
+    } else {
+      console.log("No specific action mapped for:", roleSegment);
+    }
+  }, [segments, router]);
 
   return (
     <View style={styles.wrapper} pointerEvents="box-none">
@@ -316,60 +330,64 @@ export function CustomTabBar({
           <View style={styles.barTopHighlight} />
 
           <View style={styles.barContent}>
-            {state.routes.map((route, index) => {
-              const descriptor = descriptors[route.key];
-              const isFocused = state.index === index;
+            {state.routes
+              .filter((route) => (descriptors[route.key].options as any).href !== null)
+              .map((route, index, activeRoutes) => {
+                const descriptor = descriptors[route.key];
+                const isFocused =
+                  state.index ===
+                  state.routes.findIndex((r) => r.key === route.key);
 
-              const onPress = () => {
-                const event = navigation.emit({
-                  type: "tabPress",
-                  target: route.key,
-                  canPreventDefault: true,
-                });
-                if (!isFocused && !event.defaultPrevented) {
-                  navigation.navigate(route.name, route.params);
+                const onPress = () => {
+                  const event = navigation.emit({
+                    type: "tabPress",
+                    target: route.key,
+                    canPreventDefault: true,
+                  });
+                  if (!isFocused && !event.defaultPrevented) {
+                    navigation.navigate(route.name, route.params);
+                  }
+                };
+
+                const onLongPress = () => {
+                  navigation.emit({
+                    type: "tabLongPress",
+                    target: route.key,
+                  });
+                };
+
+                const tabButton = (
+                  <TabItem
+                    key={route.key}
+                    route={route}
+                    descriptor={descriptor}
+                    isFocused={isFocused}
+                    onPress={onPress}
+                    onLongPress={onLongPress}
+                  />
+                );
+
+                if (activeRoutes.length === 2 && index === 0) {
+                  return (
+                    <React.Fragment key={route.key}>
+                      {tabButton}
+                      <View style={styles.hexSpacer} />
+                    </React.Fragment>
+                  );
                 }
-              };
 
-              const onLongPress = () => {
-                navigation.emit({
-                  type: "tabLongPress",
-                  target: route.key,
-                });
-              };
+                const mid = Math.floor(activeRoutes.length / 2);
+                if (activeRoutes.length > 2 && index === mid - 1) {
+                  return (
+                    <React.Fragment key={route.key}>
+                      {tabButton}
+                      <View style={styles.hexSpacer} />
+                    </React.Fragment>
+                  );
+                }
 
-              const tabButton = (
-                <TabItem
-                  key={route.key}
-                  route={route}
-                  descriptor={descriptor}
-                  isFocused={isFocused}
-                  onPress={onPress}
-                  onLongPress={onLongPress}
-                />
-              );
-
-              if (state.routes.length === 2 && index === 0) {
-                return (
-                  <React.Fragment key={route.key}>
-                    {tabButton}
-                    <View style={styles.hexSpacer} />
-                  </React.Fragment>
-                );
-              }
-
-              const mid = Math.floor(state.routes.length / 2);
-              if (state.routes.length > 2 && index === mid - 1) {
-                return (
-                  <React.Fragment key={route.key}>
-                    {tabButton}
-                    <View style={styles.hexSpacer} />
-                  </React.Fragment>
-                );
-              }
-
-              return tabButton;
-            })}
+                return tabButton;
+              })}
           </View>
         </View>
       </View>
