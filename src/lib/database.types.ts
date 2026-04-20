@@ -41,6 +41,7 @@ export interface Cliente {
 
 export interface Paquete {
   id_paquete: number;
+  nombre: string;
   descripcion: string;
   costo_persona: number;
 }
@@ -104,6 +105,18 @@ export interface Pago {
   numero_cuenta: string | null;
   tipo_cuenta: string | null;
   fecha_pago: string | null;
+}
+
+export interface Descuento {
+  id_descuento: number;
+  nombre: string;
+  porcentaje: number;
+  aplica_comprador: boolean;
+  cantidad_minima_boletos: number | null;
+  id_paquete_condicion: number | null;
+  es_default: boolean;
+  activo: boolean;
+  created_at: string | null;
 }
 
 export interface Usuario {

@@ -46,6 +46,24 @@ export default function CasetaTabLayout() {
           href: null,
         }}
       />
+      <Tabs.Screen
+        name="catalog/boats"
+        options={{
+          href: null,
+        }}
+      />
+      <Tabs.Screen
+        name="catalog/packages"
+        options={{
+          href: null,
+        }}
+      />
+      <Tabs.Screen
+        name="catalog/discounts"
+        options={{
+          href: null,
+        }}
+      />
     </Tabs>
   );
 }

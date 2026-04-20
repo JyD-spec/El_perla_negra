@@ -403,8 +403,10 @@ export function CustomTabBar({
       }
     } else if (roleSegment === "(tabs-caseta)") {
       // Contextual action for Caseta - emit specific event based on tab
-      const activeTab = segments[1] || 'index';
-      globalEvents.emit(`fab-press-${activeTab}`);
+      const mainSegment = segments[1] || 'index';
+      const subSegment = segments[2] ? `-${segments[2]}` : '';
+      const eventName = `fab-press-${mainSegment.replace(/\//g, '-')}${subSegment}`;
+      globalEvents.emit(eventName);
     } else if (roleSegment === "(tabs-vendedor)") {
       // Hexagon for Vendedor navigates to Panel (Quick Sale)
       router.push("/(tabs-vendedor)/" as any);
@@ -471,6 +473,12 @@ export function CustomTabBar({
                 if (roleSegment === "(tabs-barco)") {
                   // Barco only sees Viaje (index) and Settings (Config)
                   return route.name === "index" || route.name === "settings";
+                }
+
+                if (roleSegment === "(tabs-caseta)") {
+                  // Caseta only sees index, trips, reservations, settings
+                  const mainTabs = ["index", "trips", "reservations", "settings"];
+                  return mainTabs.includes(route.name);
                 }
 
                 return true;

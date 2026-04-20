@@ -49,38 +49,38 @@ function RootNavigator() {
   const router = useRouter();
 
   useEffect(() => {
+    // 1. Wait until auth is fully determined
     if (!initialized || loading) return;
 
     const inAuthGroup = segments[0] === "(auth)";
-    const inDevPortal = segments[0] === "dev";
-
+    
     if (!session) {
-      // Not logged in → go to auth
+      // 2. Force login if no session
       if (!inAuthGroup) {
         router.replace("/(auth)/login");
       }
     } else {
-      // Logged in → ensure they are in their proper place
-      const targetGroup =
-        ROLE_ROUTES[rango as keyof typeof ROLE_ROUTES] || "(tabs-comprador)";
+      // 3. Authenticated - determine target based on role
+      const targetGroup = ROLE_ROUTES[rango as keyof typeof ROLE_ROUTES] || "(tabs-comprador)";
 
-      // Rule 1: Always move away from auth if logged in
+      const inAuthGroup = segments[0] === "(auth)";
+
+      // Rule 1: Universal - Always move AWAY from auth if logged in
       if (inAuthGroup) {
         router.replace(`/${targetGroup}` as any);
         return;
       }
 
-      // Rule 2: Strict Enforcement for employees/customers
-      // Devs are allowed to move around to test interfaces
+      // Rule 2: Strict Enforcement - Only for non-Dev roles
       if (rango !== "Dev" && segments[0] !== targetGroup) {
-        // Redirection for users in the wrong role group
-        // Note: segments[0] is the root folder name
         router.replace(`/${targetGroup}` as any);
       }
     }
-  }, [session, rango, initialized, segments, loading]);
+  }, [session, rango, initialized, segments[0], loading]);
 
-  if (!initialized || loading) {
+  // 5. Performance: Only show the global spinner during the VERY FIRST cold boot.
+  // Once initialized, don't unmount the entire tree even if loading is true (e.g. background syncs)
+  if (!initialized) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color={PerlaColors.tertiary} />

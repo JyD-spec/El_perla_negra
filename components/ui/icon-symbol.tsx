@@ -30,6 +30,10 @@ const MAPPING = {
   'plus': 'add',
   'square.and.arrow.up': 'ios-share',
   'pencil.and.list.clipboard': 'assignment',
+  'gift.fill': 'card-giftcard',
+  'tag.fill': 'local-offer',
+  'trash.fill': 'delete-outline',
+  'chevron.left': 'chevron-left',
 } as IconMapping;
 
 /**

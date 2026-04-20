@@ -12,6 +12,7 @@ import {
   Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { PerlaColors } from '@/constants/theme';
 import { obtenerViajesDelDia, programarViaje, obtenerCupoViaje } from '@/src/services/viajes.service';
 import { supabase } from '@/src/lib/supabase';
@@ -42,6 +43,7 @@ export default function CasetaTripsScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [showModal, setShowModal] = useState(false);
+  const [editingViaje, setEditingViaje] = useState<ViajeConEmb | null>(null);
 
   const fetchData = useCallback(async () => {
     try {
@@ -68,6 +70,7 @@ export default function CasetaTripsScreen() {
     
     // FAB event listener
     const unsubscribe = globalEvents.on('fab-press-trips', () => {
+      setEditingViaje(null);
       setShowModal(true);
     });
     
@@ -120,7 +123,14 @@ export default function CasetaTripsScreen() {
           const estadoStyle = ESTADO_COLORS[v.estado_viaje ?? 'Programado'] ?? ESTADO_COLORS.Programado;
 
           return (
-            <View key={v.id_viaje} style={styles.viajeCard}>
+            <Pressable 
+              key={v.id_viaje} 
+              style={({ pressed }) => [styles.viajeCard, pressed && { opacity: 0.8 }]}
+              onPress={() => {
+                setEditingViaje(v);
+                setShowModal(true);
+              }}
+            >
               {/* Header */}
               <View style={styles.viajeHeader}>
                 <View style={{ flex: 1 }}>
@@ -177,16 +187,17 @@ export default function CasetaTripsScreen() {
                   🌊 {v.clima_estado} · Viento: {v.clima_viento_kmh ?? '—'} km/h
                 </Text>
               )}
-            </View>
+            </Pressable>
           );
         })}
       </ScrollView>
 
-      {/* ── New Trip Modal ────────────────────────── */}
-      <NewTripModal
+      {/* ── Trip Modal (Create/Edit) ────────────────────────── */}
+      <TripModal
         visible={showModal}
+        viaje={editingViaje}
         onClose={() => setShowModal(false)}
-        onCreated={() => {
+        onSaved={() => {
           setShowModal(false);
           fetchData();
         }}
@@ -195,37 +206,99 @@ export default function CasetaTripsScreen() {
   );
 }
 
-/* ── New Trip Modal ──────────────────────────────────────── */
+/* ── Trip Modal (Create/Edit) ────────────────────────────────── */
 
-function NewTripModal({ visible, onClose, onCreated }: {
-  visible: boolean; onClose: () => void; onCreated: () => void;
+function TripModal({ visible, viaje, onClose, onSaved }: {
+  visible: boolean; viaje: ViajeConEmb | null; onClose: () => void; onSaved: () => void;
 }) {
-  const [fecha, setFecha] = useState(new Date().toISOString().split('T')[0]);
-  const [hora, setHora] = useState('10:00');
+  const [date, setDate] = useState(new Date());
+  const [estado, setEstado] = useState<string>('Programado');
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [showTimePicker, setShowTimePicker] = useState(false);
   const [embarcaciones, setEmbarcaciones] = useState<Embarcacion[]>([]);
   const [selectedBarco, setSelectedBarco] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (visible) {
+      if (viaje) {
+        // Modo Edición
+        const vDate = new Date(`${viaje.fecha_programada}T${viaje.hora_salida_programada}`);
+        setDate(vDate);
+        setEstado(viaje.estado_viaje || 'Programado');
+        setSelectedBarco(viaje.id_embarcacion);
+      } else {
+        // Modo Creación: ajustar a la hora actual redondeada
+        const now = new Date();
+        now.setMinutes(Math.ceil(now.getMinutes() / 15) * 15);
+        now.setSeconds(0);
+        setDate(now);
+        setEstado('Programado');
+        setSelectedBarco(null);
+      }
+
       supabase.from('embarcacion').select('*').eq('estado_operativo', 'Activo')
         .then(({ data }) => {
-          if (data) setEmbarcaciones(data as Embarcacion[]);
-          if (data && data.length > 0 && !selectedBarco) setSelectedBarco(data[0].id_embarcacion);
+          if (data) {
+            setEmbarcaciones(data as Embarcacion[]);
+            if (!viaje && data.length > 0) setSelectedBarco(data[0].id_embarcacion);
+          }
         });
     }
-  }, [visible]);
+  }, [visible, viaje]);
+
+  const onDateChange = (event: DateTimePickerEvent, selectedDate?: Date) => {
+    setShowDatePicker(false);
+    if (selectedDate) {
+      const newDate = new Date(date);
+      newDate.setFullYear(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate());
+      setDate(newDate);
+    }
+  };
+
+  const onTimeChange = (event: DateTimePickerEvent, selectedTime?: Date) => {
+    setShowTimePicker(false);
+    if (selectedTime) {
+      const newDate = new Date(date);
+      newDate.setHours(selectedTime.getHours(), selectedTime.getMinutes());
+      setDate(newDate);
+    }
+  };
 
   const handleSave = async () => {
     if (!selectedBarco) return;
+    
+    // Validar pasado solo en creación
+    if (!viaje && date.getTime() < new Date().getTime() - 60000) {
+      return Alert.alert('Fecha inválida', 'No puedes programar viajes en el pasado.');
+    }
+
     setSaving(true);
     try {
-      await programarViaje({
-        fecha_programada: fecha,
-        hora_salida_programada: `${hora}:00`,
-        id_embarcacion: selectedBarco,
-      });
-      onCreated();
+      const dbFecha = date.toISOString().split('T')[0];
+      const dbHora = date.toTimeString().split(' ')[0];
+
+      if (viaje) {
+        // Update
+        const { error } = await supabase
+          .from('viaje')
+          .update({
+            fecha_programada: dbFecha,
+            hora_salida_programada: dbHora,
+            id_embarcacion: selectedBarco,
+            estado_viaje: estado as any,
+          })
+          .eq('id_viaje', viaje.id_viaje);
+        if (error) throw error;
+      } else {
+        // Create
+        await programarViaje({
+          fecha_programada: dbFecha,
+          hora_salida_programada: dbHora,
+          id_embarcacion: selectedBarco,
+        });
+      }
+      onSaved();
     } catch (err: any) {
       Alert.alert('Error', err.message);
     } finally {
@@ -233,29 +306,63 @@ function NewTripModal({ visible, onClose, onCreated }: {
     }
   };
 
+  const formatDisplayTime = (d: Date) => {
+    return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+  };
+
+  const formatDisplayDate = (d: Date) => {
+    return d.toLocaleDateString('es-MX', { day: '2-digit', month: 'long', year: 'numeric' });
+  };
+
+  const ESTADOS_DISPONIBLES = Object.keys(ESTADO_COLORS);
+
   return (
     <Modal visible={visible} transparent animationType="slide">
       <View style={modalStyles.overlay}>
         <View style={modalStyles.card}>
-          <Text style={modalStyles.title}>Programar Viaje</Text>
+          <Text style={modalStyles.title}>
+            {viaje ? 'Gestionar Viaje' : 'Programar Viaje'}
+          </Text>
 
-          <Text style={modalStyles.label}>FECHA</Text>
-          <TextInput
-            style={modalStyles.input}
-            value={fecha}
-            onChangeText={setFecha}
-            placeholder="YYYY-MM-DD"
-            placeholderTextColor={PerlaColors.onSurfaceVariant + '50'}
-          />
+          <Text style={modalStyles.label}>FECHA DEL VIAJE</Text>
+          <Pressable style={modalStyles.pickerBtn} onPress={() => setShowDatePicker(true)}>
+            <Text style={modalStyles.pickerBtnText}>📅 {formatDisplayDate(date)}</Text>
+          </Pressable>
 
           <Text style={modalStyles.label}>HORA DE SALIDA</Text>
-          <TextInput
-            style={modalStyles.input}
-            value={hora}
-            onChangeText={setHora}
-            placeholder="HH:MM"
-            placeholderTextColor={PerlaColors.onSurfaceVariant + '50'}
-          />
+          <Pressable style={modalStyles.pickerBtn} onPress={() => setShowTimePicker(true)}>
+            <Text style={modalStyles.pickerBtnText}>🕐 {formatDisplayTime(date)}</Text>
+          </Pressable>
+
+          {viaje && (
+            <>
+              <Text style={modalStyles.label}>ESTADO DEL VIAJE</Text>
+              <View style={modalStyles.statusGrid}>
+                {ESTADOS_DISPONIBLES.map(st => {
+                  const stStyle = ESTADO_COLORS[st];
+                  const isSelected = estado === st;
+                  return (
+                    <Pressable
+                      key={st}
+                      style={[
+                        modalStyles.statusBadge,
+                        { borderColor: stStyle.text + '40' },
+                        isSelected && { backgroundColor: stStyle.text, borderColor: stStyle.text }
+                      ]}
+                      onPress={() => setEstado(st)}
+                    >
+                      <Text style={[
+                        modalStyles.statusBadgeText,
+                        { color: isSelected ? '#fff' : stStyle.text }
+                      ]}>
+                        {st.replace('_', ' ')}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </>
+          )}
 
           <Text style={modalStyles.label}>EMBARCACIÓN</Text>
           <View style={modalStyles.barcoList}>
@@ -278,6 +385,26 @@ function NewTripModal({ visible, onClose, onCreated }: {
             ))}
           </View>
 
+          {showDatePicker && (
+            <DateTimePicker
+              value={date}
+              mode="date"
+              display="default"
+              minimumDate={new Date()}
+              onChange={onDateChange}
+            />
+          )}
+
+          {showTimePicker && (
+            <DateTimePicker
+              value={date}
+              mode="time"
+              is24Hour={false}
+              display="default"
+              onChange={onTimeChange}
+            />
+          )}
+
           <View style={modalStyles.actions}>
             <Pressable style={modalStyles.cancelBtn} onPress={onClose}>
               <Text style={modalStyles.cancelText}>Cancelar</Text>
@@ -290,7 +417,9 @@ function NewTripModal({ visible, onClose, onCreated }: {
               {saving ? (
                 <ActivityIndicator color={PerlaColors.onTertiary} size="small" />
               ) : (
-                <Text style={modalStyles.saveText}>Crear Viaje</Text>
+                <Text style={modalStyles.saveText}>
+                  {viaje ? 'Guardar Cambios' : 'Crear Viaje'}
+                </Text>
               )}
             </Pressable>
           </View>
@@ -436,6 +565,20 @@ const modalStyles = StyleSheet.create({
     borderWidth: 1,
     borderColor: PerlaColors.outlineVariant + '30',
   },
+  pickerBtn: {
+    backgroundColor: PerlaColors.surfaceContainer,
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderWidth: 1,
+    borderColor: PerlaColors.outlineVariant + '30',
+    marginBottom: 4,
+  },
+  pickerBtnText: {
+    fontFamily: 'Manrope-SemiBold',
+    fontSize: 16,
+    color: PerlaColors.onSurface,
+  },
   barcoList: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -486,6 +629,24 @@ const modalStyles = StyleSheet.create({
     alignItems: 'center',
     borderRadius: 12,
     backgroundColor: PerlaColors.tertiary,
+  },
+  statusGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 4,
+    marginBottom: 8,
+  },
+  statusBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  statusBadgeText: {
+    fontFamily: 'Manrope-Bold',
+    fontSize: 11,
+    textTransform: 'uppercase',
   },
   saveText: {
     fontFamily: 'Manrope-Bold',
