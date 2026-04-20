@@ -11,6 +11,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PerlaColors } from '@/constants/theme';
 import { useAuth } from '@/src/contexts/AuthContext';
+import { useToast } from '@/src/contexts/ToastContext';
 import { obtenerMisReservaciones } from '@/src/services/reservaciones.service';
 import type { ReservacionConDetalles, EstadoPase } from '@/src/lib/database.types';
 
@@ -57,19 +58,18 @@ export default function TicketsScreen() {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const router = require('expo-router').useRouter();
+  const toast = useToast();
 
   const [reservaciones, setReservaciones] = useState<ReservacionConDetalles[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
     try {
-      setError(null);
       const data = await obtenerMisReservaciones();
       setReservaciones(data);
     } catch (err: any) {
-      setError(err.message ?? 'Error cargando boletos');
+      toast.error(err.message ?? 'Error cargando boletos');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -114,18 +114,11 @@ export default function TicketsScreen() {
       {/* ── Header ───────────────────────────────────── */}
       <Text style={styles.title}>Mis Boletos</Text>
       <Text style={styles.subtitle}>
-        Tus reservaciones y pases de abordar
+        Historial de aventuras y pases de abordar
       </Text>
 
-      {/* ── Error ────────────────────────────────────── */}
-      {error && (
-        <View style={styles.errorBanner}>
-          <Text style={styles.errorText}>⚠️  {error}</Text>
-        </View>
-      )}
-
       {/* ── Empty State ──────────────────────────────── */}
-      {reservaciones.length === 0 && !error && (
+      {reservaciones.length === 0 && (
         <View style={styles.emptyState}>
           <Text style={styles.emptyIcon}>🎫</Text>
           <Text style={styles.emptyTitle}>Sin Boletos</Text>

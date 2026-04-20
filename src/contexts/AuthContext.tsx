@@ -1,5 +1,5 @@
 // src/contexts/AuthContext.tsx
-import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import { supabase } from '@/src/lib/supabase';
 import type { Session, User } from '@supabase/supabase-js';
 import type { RangoUsuario } from '@/src/lib/database.types';
@@ -43,6 +43,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     loading: true,
     initialized: false,
   });
+
+  // Ref to track the user ID currently being fetched to prevent duplicates
+  const fetchingProfileFor = useRef<string | null>(null);
 
   /**
    * Fetch the role and profile for the given user.
@@ -94,34 +97,59 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   /* ── Auth state listener ──────────────────────────── */
   useEffect(() => {
-    // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) {
-        setState(prev => ({ ...prev, session, user: session.user }));
-        fetchProfile(session.user);
-      } else {
-        setState(prev => ({
-          ...prev,
-          session: null,
-          user: null,
-          loading: false,
-          initialized: true,
-        }));
-      }
-    });
-
-    // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (_event, session) => {
+      async (event, session) => {
+        const user = session?.user ?? null;
+
+        // 1. Identify context
+        const isExplicitLogin = event === 'SIGNED_IN';
+        const isInitialLoad = event === 'INITIAL_SESSION' && !state.initialized;
+        
+        // We only show the global "ActivityIndicator" for initial boot or explicit login.
+        // TOKEN_REFRESHED or background resumes should be SILENT.
+        const shouldLockUI = isExplicitLogin || isInitialLoad;
+
+        // 2. Update basic session info
         setState(prev => ({
           ...prev,
           session,
-          user: session?.user ?? null,
+          user,
+          // Only trigger loading UI if it's a critical transition
+          loading: shouldLockUI ? true : prev.loading,
         }));
 
-        if (session?.user) {
-          await fetchProfile(session.user);
+        if (user) {
+          // 3. Avoid duplicate or redundant fetches
+          if (fetchingProfileFor.current === user.id) return;
+          
+          // Optimization: If we already have the profile for this user and it's not an explicit login, 
+          // we don't need to block the UI or re-fetch immediately.
+          if (state.user?.id === user.id && (state.rango || state.cliente) && !isExplicitLogin) {
+            if (shouldLockUI) {
+              setState(prev => ({ ...prev, loading: false, initialized: true }));
+            }
+            return;
+          }
+
+          fetchingProfileFor.current = user.id;
+          
+          try {
+            // Add a safety race to prevent infinite hanging on bad networks
+            const timeoutPromise = new Promise((_, reject) => 
+              setTimeout(() => reject(new Error('Timeout fetching profile')), 8000)
+            );
+            
+            await Promise.race([fetchProfile(user), timeoutPromise]);
+          } catch (err) {
+            console.error('Profile fetch failed or timed out:', err);
+            // Ensure we at least let the user into the app as Comprador if it fails
+            setState(prev => ({ ...prev, loading: false, initialized: true }));
+          } finally {
+            fetchingProfileFor.current = null;
+          }
         } else {
+          // 4. Clear profile on sign out (Event: SIGNED_OUT)
+          fetchingProfileFor.current = null;
           setState(prev => ({
             ...prev,
             rango: null,
@@ -134,18 +162,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     );
 
     return () => subscription.unsubscribe();
-  }, [fetchProfile]);
+  }, [fetchProfile, state.initialized, state.user?.id, state.rango, state.cliente]);
 
   /* ── Actions ──────────────────────────────────────── */
+  
+  const mapAuthError = (message: string) => {
+    const msg = message.toLowerCase();
+    if (msg.includes('network') || msg.includes('fetch') || msg.includes('disconnected') || msg.includes('internet')) {
+      return 'Sin conexión a Internet. Verifica tu señal.';
+    }
+    return message;
+  };
 
   const signIn = useCallback(async (email: string, password: string) => {
     setState(prev => ({ ...prev, loading: true }));
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) {
+    try {
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) {
+        setState(prev => ({ ...prev, loading: false }));
+        return { error: mapAuthError(error.message) };
+      }
+      return { error: null };
+    } catch (err: any) {
       setState(prev => ({ ...prev, loading: false }));
-      return { error: error.message };
+      return { error: mapAuthError(err.message || 'Error de conexión') };
     }
-    return { error: null };
   }, []);
 
   const signUp = useCallback(async (
@@ -170,14 +211,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     if (authError || !authData.user) {
       setState(prev => ({ ...prev, loading: false }));
-      return { error: authError?.message ?? 'Error al crear la cuenta' };
+      return { error: mapAuthError(authError?.message ?? 'Error al crear la cuenta') };
+    }
+
+    // 2. If we got a session back (no email confirmation required), profile will be
+    //    fetched automatically by the onAuthStateChange listener.
+    if (!authData.session) {
+      setState(prev => ({ ...prev, loading: false }));
     }
 
     return { error: null };
   }, []);
 
   const signOut = useCallback(async () => {
-    await supabase.auth.signOut();
+    // 1. Update state immediately to trigger UI redirection
     setState({
       session: null,
       user: null,
@@ -186,6 +233,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       loading: false,
       initialized: true,
     });
+
+    // 2. Perform server-side sign out in the background
+    try {
+      await supabase.auth.signOut();
+    } catch (err) {
+      console.error('Error during Supabase signOut (background):', err);
+    }
   }, []);
 
   const refreshProfile = useCallback(async () => {

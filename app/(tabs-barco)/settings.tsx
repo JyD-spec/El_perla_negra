@@ -1,6 +1,7 @@
 import { StyleSheet, View, Text, ScrollView, Pressable } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '@/src/contexts/AuthContext';
+import { useToast } from '@/src/contexts/ToastContext';
 import { PerlaColors } from '@/constants/theme';
 
 /* ── Settings Screen (shared across all roles) ─────────── */
@@ -8,6 +9,12 @@ import { PerlaColors } from '@/constants/theme';
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const { user, rango, cliente, signOut } = useAuth();
+  const toast = useToast();
+
+  const handleSignOut = () => {
+    toast.warning('Zarpando... Cerrando sesión.');
+    signOut();
+  };
 
   const displayName = cliente?.nombre_completo ?? user?.email ?? 'Usuario';
   const roleName = rango ?? 'Comprador';
@@ -39,7 +46,10 @@ export default function SettingsScreen() {
       </View>
 
       {/* Sign Out */}
-      <Pressable style={styles.signOutButton} onPress={signOut}>
+      <Pressable 
+        style={({ pressed }) => [styles.signOutButton, pressed && { opacity: 0.7 }]} 
+        onPress={handleSignOut}
+      >
         <Text style={styles.signOutText}>🚪  Cerrar Sesión</Text>
       </Pressable>
     </ScrollView>

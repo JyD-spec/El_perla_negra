@@ -18,6 +18,7 @@ import { useRouter } from 'expo-router';
 
 import { PerlaColors } from '@/constants/theme';
 import { useAuth } from '@/src/contexts/AuthContext';
+import { useToast } from '@/src/contexts/ToastContext';
 
 /* ────────────────────────────────────────────────────────────
    Login Screen – El Perla Negra
@@ -28,29 +29,27 @@ export default function LoginScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { signIn, loading } = useAuth();
+  const toast = useToast();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   const handleLogin = useCallback(async () => {
-    setError(null);
-
     if (!email.trim()) {
-      setError('Ingresa tu correo electrónico');
+      toast.warning('Ingresa tu correo electrónico');
       return;
     }
     if (!password.trim()) {
-      setError('Ingresa tu contraseña');
+      toast.warning('Ingresa tu contraseña');
       return;
     }
 
     const result = await signIn(email.trim(), password);
     if (result.error) {
-      setError(result.error);
+      toast.error(result.error);
     }
-  }, [email, password, signIn]);
+  }, [email, password, signIn, toast]);
 
   return (
     <KeyboardAvoidingView
@@ -96,12 +95,6 @@ export default function LoginScreen() {
           <Text style={styles.formSubtitle}>
             Ingresa a tu cuenta para zarpar
           </Text>
-
-          {error && (
-            <View style={styles.errorBanner}>
-              <Text style={styles.errorText}>⚠️  {error}</Text>
-            </View>
-          )}
 
           {/* Email */}
           <View style={styles.fieldGroup}>

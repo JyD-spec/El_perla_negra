@@ -4,11 +4,18 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PerlaColors } from '@/constants/theme';
 import { useAuth } from '@/src/contexts/AuthContext';
+import { useToast } from '@/src/contexts/ToastContext';
 
 export default function DevPortal() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { signOut } = useAuth();
+  const toast = useToast();
+
+  const handleSignOut = () => {
+    toast.warning('Zarpando... Cerrando sesión.');
+    signOut();
+  };
 
   return (
     <ScrollView style={styles.root} contentContainerStyle={[styles.content, { paddingTop: insets.top + 40, paddingBottom: insets.bottom + 40 }]}>
@@ -46,7 +53,10 @@ export default function DevPortal() {
         />
       </View>
 
-      <Pressable style={styles.logoutBtn} onPress={signOut}>
+      <Pressable 
+        style={({ pressed }) => [styles.logoutBtn, pressed && { opacity: 0.7 }]} 
+        onPress={handleSignOut}
+      >
         <Text style={styles.logoutText}>Cerrar Sesión (DEV)</Text>
       </Pressable>
     </ScrollView>

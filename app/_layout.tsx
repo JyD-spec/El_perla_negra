@@ -1,14 +1,22 @@
-import { DarkTheme, ThemeProvider } from '@react-navigation/native';
-import { Stack, useRouter, useSegments } from 'expo-router';
-import { StatusBar } from 'expo-status-bar';
-import { useFonts } from 'expo-font';
-import * as SplashScreen from 'expo-splash-screen';
-import { useEffect } from 'react';
-import { View, ActivityIndicator, StyleSheet } from 'react-native';
-import 'react-native-reanimated';
+import { DarkTheme, ThemeProvider } from "@react-navigation/native";
+import { useFonts } from "expo-font";
+import { Stack, useRouter, useSegments } from "expo-router";
+import * as SplashScreen from "expo-splash-screen";
+import { StatusBar } from "expo-status-bar";
+import { useEffect } from "react";
+import {
+  ActivityIndicator,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
+import "react-native-reanimated";
 
-import { PerlaColors } from '@/constants/theme';
-import { AuthProvider, useAuth } from '@/src/contexts/AuthContext';
+import { PerlaColors } from "@/constants/theme";
+import { AuthProvider, useAuth } from "@/src/contexts/AuthContext";
+import { ToastProvider } from "@/src/contexts/ToastContext";
+import { OfflineBanner } from "@/components/ui/OfflineBanner";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -17,16 +25,23 @@ const PerlaDarkTheme = {
   ...DarkTheme,
   colors: {
     ...DarkTheme.colors,
-    primary:      PerlaColors.tertiary,
-    background:   PerlaColors.background,
-    card:         PerlaColors.surfaceContainerLow,
-    text:         PerlaColors.onSurface,
-    border:       PerlaColors.outlineVariant,
+    primary: PerlaColors.tertiary,
+    background: PerlaColors.background,
+    card: PerlaColors.surfaceContainerLow,
+    text: PerlaColors.onSurface,
+    border: PerlaColors.outlineVariant,
     notification: PerlaColors.error,
   },
 };
 
 /* ── Auth-gated navigation ─────────────────────────────── */
+
+const ROLE_ROUTES = {
+  Dev: "dev",
+  Caseta: "(tabs-caseta)",
+  Vendedor: "(tabs-vendedor)",
+  Barco: "(tabs-barco)",
+} as const;
 
 function RootNavigator() {
   const { session, rango, loading, initialized } = useAuth();
@@ -34,43 +49,36 @@ function RootNavigator() {
   const router = useRouter();
 
   useEffect(() => {
-    if (!initialized) return;
+    if (!initialized || loading) return;
 
-    const inAuthGroup = segments[0] === '(auth)';
+    const inAuthGroup = segments[0] === "(auth)";
+    const inDevPortal = segments[0] === "dev";
 
     if (!session) {
       // Not logged in → go to auth
       if (!inAuthGroup) {
-        router.replace('/(auth)/login');
+        router.replace("/(auth)/login");
       }
     } else {
-      // Logged in → go to proper role tab group
-      // Logged in → ensure they are in their proper role tab group
-      const inGenericTabs = !segments[0] || segments[0] === '(tabs)';
-      
-      if (inAuthGroup || inGenericTabs) {
-        // Determine which tab group based on role
-        switch (rango) {
-          case 'Dev':
-            router.replace('/dev' as any);
-            break;
-          case 'Caseta':
-            router.replace('/(tabs-caseta)' as any);
-            break;
-          case 'Vendedor':
-            router.replace('/(tabs-vendedor)' as any);
-            break;
-          case 'Barco':
-            router.replace('/(tabs-barco)' as any);
-            break;
-          default:
-            // null rango = Comprador (registered client)
-            router.replace('/(tabs-comprador)' as any);
-            break;
-        }
+      // Logged in → ensure they are in their proper place
+      const targetGroup =
+        ROLE_ROUTES[rango as keyof typeof ROLE_ROUTES] || "(tabs-comprador)";
+
+      // Rule 1: Always move away from auth if logged in
+      if (inAuthGroup) {
+        router.replace(`/${targetGroup}` as any);
+        return;
+      }
+
+      // Rule 2: Strict Enforcement for employees/customers
+      // Devs are allowed to move around to test interfaces
+      if (rango !== "Dev" && segments[0] !== targetGroup) {
+        // Redirection for users in the wrong role group
+        // Note: segments[0] is the root folder name
+        router.replace(`/${targetGroup}` as any);
       }
     }
-  }, [session, rango, initialized, segments]);
+  }, [session, rango, initialized, segments, loading]);
 
   if (!initialized || loading) {
     return (
@@ -81,16 +89,31 @@ function RootNavigator() {
   }
 
   return (
-    <Stack screenOptions={{ headerShown: false, animation: 'fade' }}>
-      <Stack.Screen name="(auth)" />
-      <Stack.Screen name="(tabs-comprador)" />
-      <Stack.Screen name="(tabs-vendedor)" />
-      <Stack.Screen name="(tabs-caseta)" />
-      <Stack.Screen name="(tabs-barco)" />
-      <Stack.Screen name="dev" />
-      {/* Keep legacy tabs hidden but available for backwards compat */}
-      <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-    </Stack>
+    <>
+      <Stack screenOptions={{ headerShown: false, animation: "fade" }}>
+        <Stack.Screen name="(auth)" />
+        <Stack.Screen name="(tabs-comprador)" />
+        <Stack.Screen name="(tabs-vendedor)" />
+        <Stack.Screen name="(tabs-caseta)" />
+        <Stack.Screen name="(tabs-barco)" />
+        <Stack.Screen name="dev" />
+        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+      </Stack>
+
+      {/* ── Role Dev Support ── */}
+      {rango === "Dev" && segments[0] !== "dev" && (
+        <Pressable
+          style={({ pressed }) => [
+            styles.devFloatingBtn,
+            pressed && { transform: [{ scale: 0.95 }] },
+          ]}
+          onPress={() => router.replace("/dev")}
+        >
+          <Text style={styles.devFloatingIcon}>🛠️</Text>
+          <Text style={styles.devFloatingText}>Regresar a Panel DEV</Text>
+        </Pressable>
+      )}
+    </>
   );
 }
 
@@ -98,13 +121,13 @@ function RootNavigator() {
 
 export default function RootLayout() {
   const [fontsLoaded] = useFonts({
-    'Newsreader':        require('@/assets/fonts/Newsreader-Regular.ttf'),
-    'Newsreader-Italic': require('@/assets/fonts/Newsreader-Italic.ttf'),
-    'Newsreader-Bold':   require('@/assets/fonts/Newsreader-Bold.ttf'),
-    'Manrope':           require('@/assets/fonts/Manrope-Regular.ttf'),
-    'Manrope-Medium':    require('@/assets/fonts/Manrope-Medium.ttf'),
-    'Manrope-SemiBold':  require('@/assets/fonts/Manrope-SemiBold.ttf'),
-    'Manrope-Bold':      require('@/assets/fonts/Manrope-Bold.ttf'),
+    Newsreader: require("@/assets/fonts/Newsreader-Regular.ttf"),
+    "Newsreader-Italic": require("@/assets/fonts/Newsreader-Italic.ttf"),
+    "Newsreader-Bold": require("@/assets/fonts/Newsreader-Bold.ttf"),
+    Manrope: require("@/assets/fonts/Manrope-Regular.ttf"),
+    "Manrope-Medium": require("@/assets/fonts/Manrope-Medium.ttf"),
+    "Manrope-SemiBold": require("@/assets/fonts/Manrope-SemiBold.ttf"),
+    "Manrope-Bold": require("@/assets/fonts/Manrope-Bold.ttf"),
   });
 
   useEffect(() => {
@@ -118,12 +141,15 @@ export default function RootLayout() {
   }
 
   return (
-    <AuthProvider>
-      <ThemeProvider value={PerlaDarkTheme}>
-        <RootNavigator />
-        <StatusBar style="light" />
-      </ThemeProvider>
-    </AuthProvider>
+    <ToastProvider>
+      <AuthProvider>
+        <ThemeProvider value={PerlaDarkTheme}>
+          <OfflineBanner />
+          <RootNavigator />
+          <StatusBar style="light" />
+        </ThemeProvider>
+      </AuthProvider>
+    </ToastProvider>
   );
 }
 
@@ -131,7 +157,33 @@ const styles = StyleSheet.create({
   loadingContainer: {
     flex: 1,
     backgroundColor: PerlaColors.background,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  devFloatingBtn: {
+    position: "absolute",
+    bottom: 120,
+    right: 20,
+    backgroundColor: PerlaColors.tertiary,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 30,
+    gap: 8,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 10,
+    zIndex: 9999,
+  },
+  devFloatingIcon: {
+    fontSize: 18,
+  },
+  devFloatingText: {
+    fontFamily: "Manrope-Bold",
+    fontSize: 14,
+    color: PerlaColors.onTertiary,
   },
 });

@@ -16,6 +16,7 @@ import { useRouter } from 'expo-router';
 
 import { PerlaColors } from '@/constants/theme';
 import { useAuth } from '@/src/contexts/AuthContext';
+import { useToast } from '@/src/contexts/ToastContext';
 
 /* ────────────────────────────────────────────────────────────
    Register Screen – El Perla Negra
@@ -26,6 +27,7 @@ export default function RegisterScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { signUp, loading } = useAuth();
+  const toast = useToast();
 
   const [nombre, setNombre] = useState('');
   const [telefono, setTelefono] = useState('');
@@ -33,40 +35,38 @@ export default function RegisterScreen() {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
 
   const handleRegister = useCallback(async () => {
-    setError(null);
-
     if (!nombre.trim()) {
-      setError('Ingresa tu nombre completo');
+      toast.warning('Ingresa tu nombre completo');
       return;
     }
     if (!telefono.trim() || telefono.length < 10) {
-      setError('Ingresa un teléfono válido (10 dígitos)');
+      toast.warning('Ingresa un teléfono válido (10 dígitos)');
       return;
     }
     if (!email.trim()) {
-      setError('Ingresa tu correo electrónico');
+      toast.warning('Ingresa tu correo electrónico');
       return;
     }
     if (password.length < 6) {
-      setError('La contraseña debe tener al menos 6 caracteres');
+      toast.warning('La contraseña debe tener al menos 6 caracteres');
       return;
     }
     if (password !== confirmPassword) {
-      setError('Las contraseñas no coinciden');
+      toast.warning('Las contraseñas no coinciden');
       return;
     }
 
     const result = await signUp(email.trim(), password, nombre.trim(), telefono.trim());
     if (result.error) {
-      setError(result.error);
+      toast.error(result.error);
     } else {
+      toast.success('¡Registro exitoso! Bienvenido a bordo.');
       setSuccess(true);
     }
-  }, [nombre, telefono, email, password, confirmPassword, signUp]);
+  }, [nombre, telefono, email, password, confirmPassword, signUp, toast]);
 
   /* ── Success State ──────────────────────────────── */
   if (success) {
@@ -114,12 +114,6 @@ export default function RegisterScreen() {
         <Text style={styles.formSubtitle}>
           Crea tu cuenta para reservar tus aventuras en El Perla Negra
         </Text>
-
-        {error && (
-          <View style={styles.errorBanner}>
-            <Text style={styles.errorText}>⚠️  {error}</Text>
-          </View>
-        )}
 
         {/* ── Section 1: Personal ────────────────────── */}
         <View style={styles.sectionHeader}>
