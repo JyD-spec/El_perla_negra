@@ -13,13 +13,6 @@ export default function VendedorTabLayout() {
       }}
     >
       <Tabs.Screen
-        name="index"
-        options={{
-          title: 'Panel',
-          tabBarIcon: ({ color }) => <IconSymbol size={22} name="chart.bar.fill" color={color} />,
-        }}
-      />
-      <Tabs.Screen
         name="sales"
         options={{
           title: 'Ventas',
@@ -31,6 +24,12 @@ export default function VendedorTabLayout() {
         options={{
           title: 'Config',
           tabBarIcon: ({ color }) => <IconSymbol size={22} name="gearshape.fill" color={color} />,
+        }}
+      />
+      <Tabs.Screen
+        name="index"
+        options={{
+          href: null,
         }}
       />
     </Tabs>

@@ -16,6 +16,7 @@ import { PerlaColors } from '@/constants/theme';
 import { obtenerViajesDelDia, programarViaje, obtenerCupoViaje } from '@/src/services/viajes.service';
 import { supabase } from '@/src/lib/supabase';
 import type { Viaje, Embarcacion } from '@/src/lib/database.types';
+import { globalEvents } from '@/src/lib/events';
 
 /* ────────────────────────────────────────────────────────────
    Caseta – Gestión de Viajes
@@ -62,7 +63,16 @@ export default function CasetaTripsScreen() {
     }
   }, []);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => { 
+    fetchData(); 
+    
+    // FAB event listener
+    const unsubscribe = globalEvents.on('fab-press-trips', () => {
+      setShowModal(true);
+    });
+    
+    return () => unsubscribe();
+  }, [fetchData]);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);

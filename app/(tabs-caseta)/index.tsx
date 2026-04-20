@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   StyleSheet,
   View,
@@ -7,378 +7,515 @@ import {
   Pressable,
   ActivityIndicator,
   RefreshControl,
+  Dimensions,
   Platform,
-  Alert,
+  Modal,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Svg, { Circle, Path, Defs, LinearGradient as SvgGradient, Stop } from 'react-native-svg';
-import { supabase } from '@/src/lib/supabase';
-import { obtenerEstadisticasDiarias } from '@/src/services/viajes.service';
+import Svg, { 
+  Circle, 
+  Path, 
+  Defs, 
+  LinearGradient as SvgGradient, 
+  Stop,
+  G,
+} from 'react-native-svg';
+import { BlurView } from 'expo-blur';
+
+import { PerlaColors } from '@/constants/theme';
+import { IconSymbol } from '@/components/ui/icon-symbol';
+import { obtenerVistaOperativa, obtenerEstadisticasDiarias } from '@/src/services/viajes.service';
+
+import { globalEvents } from '@/src/lib/events';
+
+const { width } = Dimensions.get('window');
+const SPACING = 16;
+const CONTAINER_PADDING = 20;
+const FULL_WIDTH = width - (CONTAINER_PADDING * 2);
+
+type TimeRange = 'hoy' | '7d' | '30d' | 'personalizado';
 
 /* ────────────────────────────────────────────────────────────
-   THEME CONSTANTS (Neon / Cyberpunk / Solo Leveling Inspired)
+   MASTER DASHBOARD V2 (Caseta Operations & Analytics)
    ──────────────────────────────────────────────────────────── */
-const NEON = {
-  bg: '#0F0C1B',
-  card: '#161324',
-  cardAlt: '#1A162B',
-  primary: '#E040FB', // Neon Pink
-  secondary: '#A855F7', // Neon Purple
-  tertiary: '#8B5CF6',
-  textMain: '#F8FAFC',
-  textMuted: '#94A3B8',
-  glow: '#E040FB40',
-};
 
-export default function CasetaStatsScreen() {
+export default function CasetaMasterDashboard() {
   const insets = useSafeAreaInsets();
-  const [stats, setStats] = useState<any[]>([]);
+  
+  /* ── State ─────────────────────────────────────────────── */
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [timeRange, setTimeRange] = useState<TimeRange>('hoy');
+  const [compareMode, setCompareMode] = useState(false);
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [showExportModal, setShowExportModal] = useState(false);
+  
+  const [liveTrips, setLiveTrips] = useState<any[]>([]);
+  const [statsData, setStatsData] = useState<any>({
+    sales: [20, 45, 28, 80, 99, 43, 50],
+    pax: [15, 30, 45, 35, 60, 50, 65],
+    boats: [
+      { name: 'Perla Negra', val: 85 },
+      { name: 'Holandés Errante', val: 65 },
+      { name: 'Venganza Reina Ana', val: 45 },
+    ],
+    attendance: { boarded: 75, noShow: 25 },
+    topPackage: 'Aventura Pirata',
+    topVendor: 'Barbosa',
+    scheduledToday: 12
+  });
 
   const fetchData = useCallback(async () => {
     try {
-      const data = await obtenerEstadisticasDiarias();
-      setStats(data || []);
-    } catch (err) { }
-    finally { setLoading(false); setRefreshing(false); }
-  }, []);
+      const trips = await obtenerVistaOperativa();
+      setLiveTrips(trips || []);
+      // In a real scenario, fetch based on timeRange
+      await new Promise(resolve => setTimeout(resolve, 800));
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [timeRange]);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => {
+    fetchData();
+    
+    // FAB event listener
+    const unsubscribe = globalEvents.on('fab-press-index', () => {
+      setShowExportModal(true);
+    });
+
+    return () => unsubscribe();
+  }, [fetchData]);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
     fetchData();
   }, [fetchData]);
 
-  /* ─── Mock Data for charts based on DB limits ────── */
-  // We'll use actual data for the totals, and mock the weekly shape for the visual
-  const ingresosData = [300, 600, 450, 800, 1100, 1400, 1800]; // Simulated 7-day trend
-  const maxIngreso = Math.max(...ingresosData);
-
-  const totalIngresos = stats.reduce((sum, s) => sum + (s.ingresos_totales ?? 0), 0);
-  const totalPasajeros = stats.reduce((sum, s) => sum + (s.total_pasajeros ?? 0), 0);
-  const totalViajes = stats.reduce((sum, s) => sum + (s.total_viajes ?? 0), 0);
-
-  /* ─── Export Functionality ───────────────────────── */
-  const handleExportCSV = async () => {
-    try {
-      const header = "Fecha,Barco,Viajes,Cancelados,Pasajeros,Ingresos\n";
-      const rows = stats.map(s => 
-        `${s.fecha},${s.barco},${s.total_viajes},${s.viajes_cancelados},${s.total_pasajeros},${s.ingresos_totales}`
-      ).join('\n');
-      const csvString = header + rows;
-
-      if (Platform.OS === 'web') {
-        const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
-        const link = document.createElement("a");
-        const url = URL.createObjectURL(blob);
-        link.setAttribute("href", url);
-        link.setAttribute("download", `Reporte_PerlaNegra_${new Date().toISOString().split('T')[0]}.csv`);
-        link.style.visibility = 'hidden';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-      } else {
-        // Native Export prompt (needs expo-sharing or expo-file-system for real save)
-        Alert.alert(
-          "Exportación Generada",
-          "El archivo CSV se ha generado exitosamente en memoria. Para guardar en dispositivo móvil se requiere el módulo de compartición."
-        );
-      }
-    } catch (error) {
-      Alert.alert("Error", "No se pudo generar el documento CSV.");
-    }
-  };
-
   if (loading) {
     return (
-      <View style={[styles.root, { justifyContent: 'center', alignItems: 'center' }]}>
-        <ActivityIndicator size="large" color={NEON.primary} />
+      <View style={[styles.root, styles.centered]}>
+        <ActivityIndicator size="large" color={PerlaColors.tertiary} />
+        <Text style={styles.loadingText}>Desplegando Bitácora de Mando...</Text>
       </View>
     );
   }
 
   return (
-    <ScrollView
-      style={styles.root}
-      contentContainerStyle={[styles.content, { paddingTop: insets.top + 20, paddingBottom: insets.bottom + 120 }]}
-      showsVerticalScrollIndicator={false}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={NEON.primary} />}
-    >
-      {/* ── Header ── */}
-      <View style={styles.header}>
-        <View>
-          <Text style={styles.titleGlow}>OPERATIONAL MATRIX</Text>
-          <Text style={styles.subtitle}>System Online · {new Date().toLocaleDateString()}</Text>
-        </View>
-        <Pressable style={styles.exportBtn} onPress={handleExportCSV}>
-          <Text style={styles.exportBtnText}>EXPORT CSV</Text>
-        </Pressable>
-      </View>
-      <View style={styles.headerLine} />
+    <View style={styles.root}>
+      {/* Background decoration */}
+      <View style={styles.glowTop} />
 
-      {/* ── Main Profile Grid (2 columns on tablet, but stacked on mobile) ── */}
-      <View style={styles.gridSection}>
-        {/* Profile Card */}
-        <View style={styles.profileCard}>
-          <View style={styles.avatarGlowContainer}>
-            <View style={styles.avatarCircle}>
-              <Text style={styles.avatarEmoji}>🏴‍☠️</Text>
-            </View>
-          </View>
-          <View style={styles.profileInfo}>
-            <Text style={styles.profileName}>Administrador</Text>
-            <Text style={styles.profileRank}>Rango: Master</Text>
-          </View>
-          <View style={styles.profileStats}>
-            <StatRow icon="👥" label="Pasajeros" value={totalPasajeros} />
-            <StatRow icon="🚢" label="Viajes" value={totalViajes} />
-            <StatRow icon="💰" label="Ingresos" value={`$${totalIngresos}`} />
-          </View>
-          {/* Progress Bar (HP styled) */}
-          <View style={{ marginTop: 16 }}>
-            <Text style={styles.barLabel}>Capacidad Diaria (80%)</Text>
-            <View style={styles.barBg}>
-              <View style={[styles.barFill, { width: '80%' }]} />
-            </View>
-          </View>
+      <ScrollView
+        style={styles.root}
+        contentContainerStyle={[
+          styles.content,
+          { paddingTop: insets.top + 16, paddingBottom: 120 }
+        ]}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={PerlaColors.tertiary} />
+        }
+      >
+        {/* ── 1. ACTION: Export ── */}
+        <View style={styles.headerRow}>
+          <Text style={styles.dashTitle}>ESTADÍSTICAS</Text>
+          <Pressable style={styles.exportBtn} onPress={() => setShowExportModal(true)}>
+            <IconSymbol name="square.and.arrow.up.fill" size={12} color={PerlaColors.onTertiary} />
+            <Text style={styles.exportText}>EXPORTAR REPORTE</Text>
+          </Pressable>
         </View>
 
-        {/* Weekly Trend (Bar Tracker) */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>WEEKLY TREND</Text>
-          <View style={styles.barsContainer}>
-            {ingresosData.map((val, i) => {
-              const pct = (val / maxIngreso) * 100;
-              return (
-                <View key={i} style={styles.barTrack}>
-                  <View style={[styles.barGlow, { height: `${pct}%` }]} />
-                  <Text style={styles.barXLabel}>{(i + 1).toString()}</Text>
+        {/* ── Export Format Modal ── */}
+        <Modal visible={showExportModal} transparent animationType="fade">
+          <Pressable 
+            style={styles.modalOverlay} 
+            onPress={() => setShowExportModal(false)}
+          >
+            <BlurView intensity={20} tint="dark" style={styles.exportModalContent}>
+              <Text style={styles.exportModalTitle}>Exportar Reporte</Text>
+              <Text style={styles.exportModalSub}>Selecciona el formato de tu bitácora</Text>
+              
+              <View style={styles.exportOptions}>
+                <Pressable 
+                  style={styles.exportOption} 
+                  onPress={() => {
+                    console.log('Exporting PDF...');
+                    setShowExportModal(false);
+                  }}
+                >
+                  <View style={[styles.exportIconBox, { backgroundColor: '#FF525222' }]}>
+                    <Text style={{ fontSize: 24 }}>📄</Text>
+                  </View>
+                  <Text style={styles.exportOptionText}>PDF</Text>
+                </Pressable>
+
+                <Pressable 
+                  style={styles.exportOption}
+                  onPress={() => {
+                    console.log('Exporting Excel...');
+                    setShowExportModal(false);
+                  }}
+                >
+                  <View style={[styles.exportIconBox, { backgroundColor: '#4CAF5022' }]}>
+                    <Text style={{ fontSize: 24 }}>xlsx</Text>
+                  </View>
+                  <Text style={styles.exportOptionText}>Excel</Text>
+                </Pressable>
+              </View>
+
+              <Pressable 
+                style={styles.cancelLink} 
+                onPress={() => setShowExportModal(false)}
+              >
+                <Text style={styles.cancelLinkText}>Cancelar</Text>
+              </Pressable>
+            </BlurView>
+          </Pressable>
+        </Modal>
+
+        {/* ── 2. OPERATION: Current Trips ── */}
+        <View style={styles.sectionHeader}>
+          <View style={styles.pulseDot} />
+          <Text style={styles.sectionLabel}>VIAJES ACTUALES</Text>
+        </View>
+
+        <View style={styles.tripCard}>
+          {liveTrips.length === 0 ? (
+            <Text style={styles.emptyText}>No hay naves en navegación actualmente.</Text>
+          ) : (
+            liveTrips.slice(0, 3).map((trip, idx) => (
+              <View key={trip.id_viaje} style={[styles.tripRow, idx === 0 && { borderTopWidth: 0 }]}>
+                <View style={styles.boatCol}>
+                  <View style={styles.boatBubble}>
+                    <IconSymbol name="sailboat.fill" size={14} color={PerlaColors.tertiary} />
+                  </View>
+                  <Text style={styles.boatName} numberOfLines={1}>{trip.nombre_barco}</Text>
                 </View>
-              );
-            })}
-          </View>
-          <View style={styles.trendFooter}>
-            <Text style={styles.trendUp}>UP +14%</Text>
-            <Text style={styles.trendSub}>Semana actual</Text>
-          </View>
+                
+                <View style={styles.dataGrid}>
+                  <View style={styles.dataCol}>
+                    <Text style={styles.dataVal}>{trip.hora_salida_programada?.slice(0,5)} - {trip.hora_limite_zarpe?.slice(0,5)}</Text>
+                    <Text style={styles.dataLab}>ZARPE - REGRESO</Text>
+                  </View>
+                  <View style={styles.paxMoneyCol}>
+                    <View style={styles.miniStat}>
+                      <Text style={styles.dataVal}>45</Text>
+                      <Text style={styles.dataLab}>PAX</Text>
+                    </View>
+                    <View style={[styles.miniStat, { alignItems: 'flex-end' }]}>
+                      <Text style={[styles.dataVal, { color: PerlaColors.tertiary }]}>$12k</Text>
+                      <Text style={styles.dataLab}>MONTO</Text>
+                    </View>
+                  </View>
+                </View>
+              </View>
+            ))
+          )}
         </View>
-      </View>
 
-      {/* ── Middle Section ── */}
-      <View style={styles.gridSection}>
-        {/* Skill Tracker (Horizontal bars) */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>KPI TRACKER</Text>
-          <HorizontalBar label="Puntualidad" icon="⏱️" value={92} />
-          <HorizontalBar label="Ventas app" icon="📱" value={45} />
-          <HorizontalBar label="Efectivo" icon="💵" value={78} />
-          <HorizontalBar label="Satisfacción" icon="⭐" value={98} />
+        {/* ── 3. FILTERS: Time ── */}
+        <View style={styles.filterSection}>
+          <View style={styles.filterTabs}>
+            {(['hoy', '7d', '30d', 'personalizado'] as TimeRange[]).map((r) => (
+              <Pressable
+                key={r}
+                onPress={() => setTimeRange(r)}
+                style={[styles.filterTab, timeRange === r && styles.filterTabActive]}
+              >
+                <Text style={[styles.filterTabText, timeRange === r && styles.filterTabTextActive]}>
+                  {r === 'personalizado' ? '...' : r.toUpperCase()}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+          
+          {timeRange === 'personalizado' && (
+            <BlurView intensity={20} tint="dark" style={styles.customFilterBox}>
+              <View style={styles.customRow}>
+                <Pressable style={styles.dateSelector}><Text style={styles.dateText}>Inicio - Fin</Text></Pressable>
+                <Pressable 
+                  style={[styles.compareToggle, compareMode && styles.compareActive]}
+                  onPress={() => setCompareMode(!compareMode)}
+                >
+                  <Text style={styles.compareText}>COMPARAR</Text>
+                </Pressable>
+              </View>
+            </BlurView>
+          )}
         </View>
 
-        {/* Glowing Gradient Bars (Revenue) */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>REVENUE MODULE</Text>
-          <View style={styles.revenueHeader}>
-            <View><Text style={styles.revVal}>12k</Text><Text style={styles.revLab}>Esta Sem</Text></View>
-            <View><Text style={styles.revVal}>18k</Text><Text style={styles.revLab}>Pasada</Text></View>
-            <View><Text style={styles.revVal}>45k</Text><Text style={styles.revLab}>Mensual</Text></View>
-          </View>
-          <View style={styles.revenueBarsContainer}>
-            {[40, 20, 60, 30, 90, 80].map((v, i) => (
-              <View key={i} style={styles.revenueBarBin}>
-                <View style={[styles.revenueBarInner, { height: `${v}%` }]} />
-                <View style={[styles.revenueBarGlowTop, { bottom: `${v}%` }]} />
+        {/* ── 4. ANALYTICS ── */}
+        
+        {/* Sales Trend */}
+        <View style={styles.chartTile}>
+          <Text style={styles.tileTitle}>TENDENCIAS DE VENTAS</Text>
+          <LineChart data={statsData.sales} color={PerlaColors.tertiary} />
+        </View>
+
+        {/* Customer Trend */}
+        <View style={styles.chartTile}>
+          <Text style={styles.tileTitle}>TENDENCIAS CLIENTES</Text>
+          <LineChart data={statsData.pax} color={PerlaColors.primary} area />
+        </View>
+
+        {/* Boats Distribution & Top Vendor (Row) */}
+        <View style={styles.bentoRow}>
+          <View style={[styles.tile, { flex: 1.2 }]}>
+            <Text style={styles.tileTitle}>BARCOS SOLICITADOS</Text>
+            {statsData.boats.map((b: any, i: number) => (
+              <View key={i} style={styles.boatRankRow}>
+                <Text style={styles.rankLabel}>{b.name}</Text>
+                <View style={styles.rankTrack}>
+                  <View style={[styles.rankFill, { width: `${b.val}%`, backgroundColor: i === 0 ? PerlaColors.tertiary : PerlaColors.primary }]} />
+                </View>
               </View>
             ))}
           </View>
-        </View>
-      </View>
-
-      {/* ── Bottom Section ── */}
-      <View style={styles.gridSection}>
-        {/* Ring / Goal Completion */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>OCCUPANCY RATE</Text>
-          <View style={styles.ringContainer}>
-            <Svg width="140" height="140" viewBox="0 0 140 140">
-              <Defs>
-                <SvgGradient id="grad" x1="0" y1="0" x2="1" y2="1">
-                  <Stop offset="0" stopColor={NEON.primary} />
-                  <Stop offset="1" stopColor={NEON.secondary} />
-                </SvgGradient>
-              </Defs>
-              <Circle cx="70" cy="70" r="50" stroke={NEON.cardAlt} strokeWidth="16" fill="none" />
-              <Circle 
-                cx="70" cy="70" r="50" 
-                stroke="url(#grad)" 
-                strokeWidth="16" 
-                fill="none" 
-                strokeDasharray="314" 
-                strokeDashoffset={314 * 0.25} 
-                strokeLinecap="round" 
-                transform="rotate(-90 70 70)"
-              />
-            </Svg>
-            <View style={styles.ringCenter}>
-              <Text style={styles.ringVal}>75%</Text>
-              <Text style={styles.ringLab}>Lleno</Text>
-            </View>
-          </View>
-          <View style={styles.ringDots}>
-            <View style={styles.ringDot} /><View style={styles.ringDot} /><View style={styles.ringDot} />
-          </View>
-        </View>
-
-        {/* Small Widgets stack */}
-        <View style={{ flex: 1, gap: 16 }}>
-          <View style={styles.card}>
-            <View style={styles.widgetRow}>
-              <Text style={styles.widgetIcon}>📦</Text>
-              <View>
-                <Text style={styles.widgetTitle}>Paquetes Populares</Text>
-                <Text style={styles.widgetDesc}>1. Básico  2. Comida</Text>
-              </View>
-            </View>
-          </View>
-          <View style={styles.card}>
-            <View style={styles.widgetRow}>
-              <Text style={styles.widgetIcon}>⚠️</Text>
-              <View>
-                <Text style={styles.widgetTitle}>Alertas del Sistema</Text>
-                <Text style={styles.widgetDesc}>Clima óptimo para zarpado</Text>
-              </View>
+          
+          <View style={[styles.tile, { flex: 0.8 }]}>
+            <Text style={styles.tileTitle}>VENDEDOR TOP</Text>
+            <View style={styles.centerBox}>
+              <View style={styles.vendorAvatar}><Text style={{fontSize: 24}}>🏴‍☠️</Text></View>
+              <Text style={styles.hugeVal}>{statsData.topVendor}</Text>
+              <Text style={styles.subVal}>Líder del Mes</Text>
             </View>
           </View>
         </View>
-      </View>
-      
-    </ScrollView>
-  );
-}
 
-/* ── Components ── */
-function StatRow({ icon, label, value }: { icon: string, label: string, value: string | number }) {
-  return (
-    <View style={styles.statRow}>
-      <Text style={styles.statIcon}>{icon}</Text>
-      <Text style={styles.statLabel}>{label}</Text>
-      <View style={{ flex: 1 }} />
-      <Text style={styles.statValue}>{value}</Text>
+        {/* Attendance (Pie Chart) - GLOBAL */}
+        <View style={styles.chartTile}>
+          <Text style={styles.tileTitle}>ASISTENCIA GLOBAL</Text>
+          <View style={styles.pieContainer}>
+            <AttendancePie boarded={78} noShow={22} />
+            <View style={styles.pieLegend}>
+              <LegendItem color={PerlaColors.tertiary} label="Subieron" val="78%" />
+              <LegendItem color={PerlaColors.surfaceContainerHighest} label="No-show" val="22%" />
+            </View>
+          </View>
+        </View>
+
+        {/* Bottom Bento: Top Package & Scheduled */}
+        <View style={styles.bentoRow}>
+          <View style={[styles.tile, { flex: 1, backgroundColor: PerlaColors.secondary + '20' }]}>
+            <Text style={styles.tileTitle}>PAQUETE REY</Text>
+            <Text style={styles.heroVal}>{statsData.topPackage}</Text>
+            <Text style={styles.subVal}>Favorito de los clientes</Text>
+          </View>
+          <View style={[styles.tile, { width: 120 }]}>
+            <Text style={styles.tileTitle}>PROG. HOY</Text>
+            <Text style={styles.heroVal}>{statsData.scheduledToday}</Text>
+            <Text style={styles.subVal}>Viajes en bitácora</Text>
+          </View>
+        </View>
+
+      </ScrollView>
     </View>
   );
 }
 
-function HorizontalBar({ label, icon, value }: { label: string, icon: string, value: number }) {
+/* ── Components ───────────────────────────────────── */
+
+function LegendItem({ color, label, val }: any) {
   return (
-    <View style={styles.horizBarRow}>
-      <View style={styles.horizBarIconContainer}><Text>{icon}</Text></View>
-      <View style={{ flex: 1 }}>
-        <Text style={styles.horizBarLabel}>{label}</Text>
-        <View style={styles.horizBarBg}>
-          <View style={[styles.horizBarFill, { width: `${value}%` }]} />
-        </View>
-      </View>
-      <Text style={styles.horizBarVal}>{value}%</Text>
+    <View style={styles.legendItem}>
+      <View style={[styles.legendDot, { backgroundColor: color }]} />
+      <Text style={styles.legendLab}>{label}: </Text>
+      <Text style={styles.legendVal}>{val}</Text>
     </View>
   );
 }
 
+function AttendancePie({ boarded, noShow }: any) {
+  const size = 120;
+  const stroke = 20;
+  const r = (size - stroke) / 2;
+  const c = 2 * Math.PI * r;
+  const dashOffset = c - (boarded / 100) * c;
 
-/* ── Styles ── */
+  return (
+    <View style={styles.pieWrapper}>
+      <Svg width={size} height={size}>
+        <Circle cx={size/2} cy={size/2} r={r} stroke={PerlaColors.surfaceContainerHighest} strokeWidth={stroke} fill="none" />
+        <Circle 
+          cx={size/2} cy={size/2} r={r} 
+          stroke={PerlaColors.tertiary} 
+          strokeWidth={stroke} 
+          fill="none" 
+          strokeDasharray={c} 
+          strokeDashoffset={dashOffset}
+          strokeLinecap="round"
+          transform={`rotate(-90 ${size/2} ${size/2})`}
+        />
+      </Svg>
+      <View style={styles.pieCenter}>
+        <Text style={styles.pieCenterVal}>{boarded}%</Text>
+      </View>
+    </View>
+  );
+}
+
+function LineChart({ data, color, area }: { data: number[], color: string, area?: boolean }) {
+  const h = 80;
+  const w = FULL_WIDTH - 40;
+  const stepX = w / (data.length - 1);
+  const getPath = (points: number[]) => points.map((v, i) => `${i === 0 ? 'M' : 'L'} ${i * stepX} ${h - (v / 100) * h}`).join(' ');
+
+  return (
+    <View style={{ height: h, marginTop: 16 }}>
+      <Svg height={h} width={w}>
+        <Defs><SvgGradient id="grad" x1="0" y1="0" x2="0" y2="1"><Stop offset="0" stopColor={color} stopOpacity="0.3" /><Stop offset="1" stopColor={color} stopOpacity="0" /></SvgGradient></Defs>
+        {area && <Path d={`${getPath(data)} L ${w} ${h} L 0 ${h} Z`} fill="url(#grad)" />}
+        <Path d={getPath(data)} fill="none" stroke={color} strokeWidth="3" strokeLinecap="round" />
+        {data.map((v, i) => <Circle key={i} cx={i * stepX} cy={h - (v / 100) * h} r="3.5" fill={PerlaColors.surface} stroke={color} strokeWidth="2" />)}
+      </Svg>
+    </View>
+  );
+}
+
+/* ── Styles ────────────────────────────────────────────────── */
+
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: NEON.bg },
-  content: { paddingHorizontal: 16 },
-
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 },
-  titleGlow: { 
-    fontFamily: 'Newsreader-Bold', fontSize: 24, color: NEON.textMain, 
-    textShadowColor: NEON.glow, textShadowOffset: { width: 0, height: 0 }, textShadowRadius: 10,
-    letterSpacing: 2, textTransform: 'uppercase',
-  },
-  subtitle: { fontFamily: 'Manrope', fontSize: 12, color: NEON.textMuted, marginTop: 4 },
+  root: { flex: 1, backgroundColor: PerlaColors.surface },
+  centered: { justifyContent: 'center', alignItems: 'center' },
+  loadingText: { marginTop: 12, fontFamily: 'Manrope', color: PerlaColors.onSurfaceVariant, fontSize: 13 },
+  content: { paddingHorizontal: CONTAINER_PADDING },
   
+  glowTop: { position: 'absolute', top: -100, right: -50, width: 300, height: 300, borderRadius: 150, backgroundColor: PerlaColors.tertiary + '05' },
+
+  /* 1. Header */
+  headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 },
+  dashTitle: { fontFamily: 'Newsreader-Bold', fontSize: 24, color: PerlaColors.onSurface, letterSpacing: 1 },
   exportBtn: {
-    backgroundColor: NEON.primary + '20', borderWidth: 1, borderColor: NEON.primary,
-    paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20,
-    shadowColor: NEON.primary, shadowOpacity: 0.8, shadowRadius: 10, shadowOffset: { width: 0, height: 0 },
+    flexDirection: 'row', alignItems: 'center', backgroundColor: PerlaColors.tertiary,
+    paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12, gap: 8, elevation: 4,
   },
-  exportBtnText: { fontFamily: 'Manrope-Bold', fontSize: 11, color: NEON.primary, letterSpacing: 1 },
+  exportText: { fontFamily: 'Manrope-Bold', fontSize: 10, color: PerlaColors.onTertiary, letterSpacing: 0.5 },
+
+  /* 2. Live Trips */
+  sectionHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
+  pulseDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#FF5252', marginRight: 8 },
+  sectionLabel: { fontFamily: 'Manrope-Bold', fontSize: 11, color: '#FF5252', letterSpacing: 1.5 },
   
-  headerLine: { height: 1, backgroundColor: NEON.primary + '30', marginVertical: 16 },
+  tripCard: { backgroundColor: PerlaColors.surfaceContainerLow, borderRadius: 20, overflow: 'hidden', borderWidth: 1, borderColor: PerlaColors.outlineVariant, marginBottom: 24 },
+  tripRow: { flexDirection: 'row', padding: 16, borderTopWidth: 1, borderTopColor: PerlaColors.outlineVariant, gap: 12 },
+  boatCol: { width: 90, alignItems: 'center' },
+  boatBubble: { width: 36, height: 36, borderRadius: 18, backgroundColor: PerlaColors.surfaceContainerHigh, alignItems: 'center', justifyContent: 'center', marginBottom: 6 },
+  boatName: { fontFamily: 'Manrope-Bold', fontSize: 11, color: PerlaColors.onSurface, textAlign: 'center' },
+  dataGrid: { flex: 1, flexDirection: 'row', gap: 12 },
+  dataCol: { flex: 1, justifyContent: 'center' },
+  paxMoneyCol: { flex: 1.2, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  miniStat: { alignItems: 'flex-start' },
+  dataVal: { fontFamily: 'Newsreader-Bold', fontSize: 14, color: PerlaColors.onSurface },
+  dataLab: { fontFamily: 'Manrope', fontSize: 8, color: PerlaColors.onSurfaceVariant, letterSpacing: 0.5 },
+  emptyText: { padding: 20, color: PerlaColors.onSurfaceVariant, textAlign: 'center', fontFamily: 'Manrope' },
 
-  gridSection: { flexDirection: 'column', gap: 16, marginBottom: 16 }, // Mobile optimized, no dual columns without wrapper width checks
-  card: {
-    backgroundColor: NEON.card, borderRadius: 16, padding: 16,
-    borderWidth: 1, borderColor: NEON.primary + '15',
-  },
-  cardTitle: { fontFamily: 'Manrope-Bold', fontSize: 12, color: NEON.textMain, letterSpacing: 1.5, marginBottom: 16 },
+  /* 3. Filters */
+  filterSection: { marginBottom: 24 },
+  filterTabs: { flexDirection: 'row', backgroundColor: PerlaColors.surfaceContainerLow, borderRadius: 14, padding: 4 },
+  filterTab: { flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: 'center' },
+  filterTabActive: { backgroundColor: PerlaColors.surfaceContainerHigh },
+  filterTabText: { fontFamily: 'Manrope-Bold', fontSize: 10, color: PerlaColors.onSurfaceVariant },
+  filterTabTextActive: { color: PerlaColors.tertiary },
+  customFilterBox: { marginTop: 12, borderRadius: 16, padding: 12, overflow: 'hidden', backgroundColor: PerlaColors.surfaceContainerLow },
+  customRow: { flexDirection: 'row', gap: 10 },
+  dateSelector: { flex: 1, padding: 10, borderRadius: 8, backgroundColor: PerlaColors.surfaceContainerHigh, justifyContent: 'center' },
+  dateText: { color: PerlaColors.onSurface, fontSize: 11, fontFamily: 'Manrope' },
+  compareToggle: { padding: 10, borderRadius: 8, backgroundColor: PerlaColors.surfaceContainerHigh, justifyContent: 'center' },
+  compareActive: { backgroundColor: PerlaColors.tertiary },
+  compareText: { fontSize: 10, fontFamily: 'Manrope-Bold', color: PerlaColors.onSurfaceVariant },
 
-  /* Profile Card */
-  profileCard: {
-    backgroundColor: NEON.card, borderRadius: 16, padding: 20, 
-    borderWidth: 1, borderColor: NEON.primary + '15',
-  },
-  avatarGlowContainer: {
-    alignSelf: 'center', marginBottom: 12,
-    borderRadius: 50, shadowColor: NEON.primary, shadowOpacity: 0.8, shadowRadius: 20, elevation: 10,
-  },
-  avatarCircle: {
-    width: 80, height: 80, borderRadius: 40, backgroundColor: NEON.cardAlt,
-    borderWidth: 2, borderColor: NEON.primary, alignItems: 'center', justifyContent: 'center',
-  },
-  avatarEmoji: { fontSize: 32 },
-  profileInfo: { alignItems: 'center', marginBottom: 16 },
-  profileName: { fontFamily: 'Newsreader-Bold', fontSize: 20, color: NEON.textMain, textShadowColor: NEON.glow, textShadowRadius: 5 },
-  profileRank: { fontFamily: 'Manrope', fontSize: 12, color: NEON.secondary },
-  profileStats: { gap: 8, backgroundColor: NEON.cardAlt, padding: 12, borderRadius: 12 },
-  statRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 4 },
-  statIcon: { fontSize: 12, marginRight: 8 },
-  statLabel: { fontFamily: 'Manrope', fontSize: 12, color: NEON.textMuted },
-  statValue: { fontFamily: 'Manrope-Bold', fontSize: 13, color: NEON.textMain },
+  /* 4. Analytics Titles & Bento */
+  chartTile: { backgroundColor: PerlaColors.surfaceContainerLow, borderRadius: 24, padding: 20, marginBottom: 16, borderWidth: 1, borderColor: PerlaColors.outlineVariant },
+  tileTitle: { fontFamily: 'Manrope-Bold', fontSize: 11, color: PerlaColors.onSurfaceVariant, letterSpacing: 1.5, marginBottom: 4 },
+  bentoRow: { flexDirection: 'row', gap: 16, marginBottom: 16 },
+  tile: { backgroundColor: PerlaColors.surfaceContainerLow, borderRadius: 24, padding: 16, borderWidth: 1, borderColor: PerlaColors.outlineVariant },
   
-  barLabel: { fontFamily: 'Manrope-Bold', fontSize: 10, color: NEON.textMuted, marginBottom: 4, letterSpacing: 1 },
-  barBg: { height: 8, backgroundColor: NEON.cardAlt, borderRadius: 4, overflow: 'hidden' },
-  barFill: { height: '100%', backgroundColor: NEON.primary, borderRadius: 4 },
+  boatRankRow: { marginBottom: 10 },
+  rankLabel: { fontFamily: 'Manrope', fontSize: 10, color: PerlaColors.onSurfaceVariant, marginBottom: 4 },
+  rankTrack: { height: 4, backgroundColor: PerlaColors.surfaceContainerHigh, borderRadius: 2, overflow: 'hidden' },
+  rankFill: { height: '100%', borderRadius: 2 },
 
-  /* Weekly Bars */
-  barsContainer: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', height: 120, marginBottom: 16 },
-  barTrack: { width: '10%', height: '100%', justifyContent: 'flex-end', alignItems: 'center' },
-  barGlow: { width: '100%', backgroundColor: NEON.primary, borderTopLeftRadius: 4, borderTopRightRadius: 4, shadowColor: NEON.primary, shadowRadius: 8, shadowOpacity: 0.8 },
-  barXLabel: { fontFamily: 'Manrope-Bold', fontSize: 9, color: NEON.textMuted, marginTop: 8 },
-  trendFooter: { flexDirection: 'row', gap: 10, alignItems: 'center' },
-  trendUp: { fontFamily: 'Manrope-Bold', fontSize: 13, color: NEON.primary },
-  trendSub: { fontFamily: 'Manrope', fontSize: 11, color: NEON.textMuted },
+  centerBox: { alignItems: 'center', marginTop: 12 },
+  vendorAvatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: PerlaColors.surfaceContainerHigh, alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
+  hugeVal: { fontFamily: 'Newsreader-Bold', fontSize: 22, color: PerlaColors.onSurface },
+  subVal: { fontFamily: 'Manrope', fontSize: 9, color: PerlaColors.onSurfaceVariant },
+  heroVal: { fontFamily: 'Newsreader-Bold', fontSize: 20, color: PerlaColors.onSurface, marginTop: 12 },
 
-  /* Horiz Bars */
-  horizBarRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 14, gap: 12 },
-  horizBarIconContainer: { width: 32, height: 32, borderRadius: 16, backgroundColor: NEON.cardAlt, alignItems: 'center', justifyContent: 'center' },
-  horizBarLabel: { fontFamily: 'Manrope', fontSize: 11, color: NEON.textMain, marginBottom: 4 },
-  horizBarBg: { height: 4, backgroundColor: NEON.cardAlt, borderRadius: 2 },
-  horizBarFill: { height: '100%', backgroundColor: NEON.secondary, borderRadius: 2 },
-  horizBarVal: { fontFamily: 'Manrope-Bold', fontSize: 11, color: NEON.textMuted },
+  /* Pie Chart */
+  pieContainer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around', marginTop: 12 },
+  pieWrapper: { alignItems: 'center', justifyContent: 'center' },
+  pieCenter: { position: 'absolute', alignItems: 'center' },
+  pieCenterVal: { fontFamily: 'Newsreader-Bold', fontSize: 22, color: PerlaColors.onSurface },
+  pieLegend: { gap: 8 },
+  legendItem: { flexDirection: 'row', alignItems: 'center' },
+  legendDot: { width: 8, height: 8, borderRadius: 4, marginRight: 8 },
+  legendLab: { fontFamily: 'Manrope', fontSize: 11, color: PerlaColors.onSurfaceVariant },
+  legendVal: { fontFamily: 'Manrope-Bold', fontSize: 11, color: PerlaColors.onSurface },
 
-  /* Glowing Vertical Bars (Revenue) */
-  revenueHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20 },
-  revVal: { fontFamily: 'Newsreader-Bold', fontSize: 16, color: NEON.textMain },
-  revLab: { fontFamily: 'Manrope', fontSize: 10, color: NEON.textMuted },
-  revenueBarsContainer: { flexDirection: 'row', justifyContent: 'space-around', alignItems: 'flex-end', height: 100 },
-  revenueBarBin: { width: 24, height: '100%', justifyContent: 'flex-end', backgroundColor: NEON.cardAlt, borderRadius: 12, paddingHorizontal: 4, paddingBottom: 4 },
-  revenueBarInner: { width: '100%', backgroundColor: NEON.primary + '80', borderRadius: 8 },
-  revenueBarGlowTop: { position: 'absolute', width: 24, height: 10, backgroundColor: '#fff', borderRadius: 5, shadowColor: NEON.primary, shadowRadius: 15, shadowOpacity: 1, elevation: 5 },
-
-  /* Ring Chart */
-  ringContainer: { alignItems: 'center', marginVertical: 10 },
-  ringCenter: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, alignItems: 'center', justifyContent: 'center' },
-  ringVal: { fontFamily: 'Newsreader-Bold', fontSize: 24, color: NEON.textMain },
-  ringLab: { fontFamily: 'Manrope', fontSize: 11, color: NEON.textMuted },
-  ringDots: { flexDirection: 'row', justifyContent: 'center', gap: 6 },
-  ringDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: NEON.primary + '40' },
-
-  /* Tiny widgets */
-  widgetRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  widgetIcon: { fontSize: 24, padding: 10, backgroundColor: NEON.cardAlt, borderRadius: 12 },
-  widgetTitle: { fontFamily: 'Manrope-Bold', fontSize: 13, color: NEON.textMain },
-  widgetDesc: { fontFamily: 'Manrope', fontSize: 11, color: NEON.textMuted },
+  /* Export Modal */
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 30,
+  },
+  exportModalContent: {
+    width: '100%',
+    backgroundColor: PerlaColors.surfaceContainerLow,
+    borderRadius: 32,
+    padding: 32,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: PerlaColors.outlineVariant,
+    overflow: 'hidden',
+  },
+  exportModalTitle: {
+    fontFamily: 'Newsreader-Bold',
+    fontSize: 24,
+    color: PerlaColors.onSurface,
+    marginBottom: 8,
+  },
+  exportModalSub: {
+    fontFamily: 'Manrope',
+    fontSize: 13,
+    color: PerlaColors.onSurfaceVariant,
+    marginBottom: 24,
+    textAlign: 'center',
+  },
+  exportOptions: {
+    flexDirection: 'row',
+    gap: 20,
+    marginBottom: 24,
+  },
+  exportOption: {
+    alignItems: 'center',
+    gap: 8,
+  },
+  exportIconBox: {
+    width: 70,
+    height: 70,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: PerlaColors.outlineVariant,
+  },
+  exportOptionText: {
+    fontFamily: 'Manrope-Bold',
+    fontSize: 14,
+    color: PerlaColors.onSurface,
+  },
+  cancelLink: {
+    padding: 8,
+  },
+  cancelLinkText: {
+    fontFamily: 'Manrope-Bold',
+    fontSize: 13,
+    color: PerlaColors.onSurfaceVariant,
+  },
 });

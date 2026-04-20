@@ -22,9 +22,12 @@ export async function obtenerMisReservaciones() {
     .from('cliente')
     .select('id_cliente')
     .eq('auth_id', user.id)
-    .single();
+    .maybeSingle();
 
-  if (clienteErr || !clienteData) throw clienteErr ?? new Error('Cliente no encontrado');
+  if (clienteErr) throw clienteErr;
+  
+  // If no client profile exists yet, it's impossible to have reservations
+  if (!clienteData) return [];
 
   // 2. Get reservations with related data
   const { data, error } = await supabase
@@ -149,7 +152,7 @@ export async function crearReservacion(datos: {
       .from('cliente')
       .select('id_cliente')
       .eq('auth_id', datos.authId)
-      .single();
+      .maybeSingle();
 
     if (existing) {
       idCliente = existing.id_cliente;

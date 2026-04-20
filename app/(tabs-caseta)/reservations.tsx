@@ -11,7 +11,9 @@ import {
   Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
 import { PerlaColors } from '@/constants/theme';
+import { globalEvents } from '@/src/lib/events';
 import {
   obtenerReservacionesDelDia,
   aprobarPase,
@@ -45,6 +47,7 @@ const ESTADO_STYLE: Record<string, { bg: string; text: string }> = {
 
 export default function CasetaReservationsScreen() {
   const insets = useSafeAreaInsets();
+  const router = useRouter();
 
   const [reservaciones, setReservaciones] = useState<ReservacionConDetalles[]>([]);
   const [loading, setLoading] = useState(true);
@@ -65,7 +68,16 @@ export default function CasetaReservationsScreen() {
     }
   }, []);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => { 
+    fetchData(); 
+    
+    // FAB event listener
+    const unsubscribe = globalEvents.on('fab-press-reservations', () => {
+      router.push('/(tabs-caseta)/new-reservation');
+    });
+
+    return () => unsubscribe();
+  }, [fetchData]);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);

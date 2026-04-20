@@ -1,7 +1,7 @@
 import { BottomTabBarProps } from "@react-navigation/bottom-tabs";
 import { BlurView } from "expo-blur";
 import { useRouter, useSegments } from "expo-router";
-import React, { useCallback, useRef } from "react";
+import React, { useCallback, useRef, useState, useEffect } from "react";
 import {
   Animated,
   Platform,
@@ -19,6 +19,10 @@ import Svg, {
 
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { PerlaColors } from "@/constants/theme";
+import { obtenerMisReservaciones } from "@/src/services/reservaciones.service";
+import { globalEvents } from "@/src/lib/events";
+
+type IconName = 'ticket.fill' | 'calendar.badge.plus' | 'plus' | 'square.and.arrow.up' | 'pencil.and.list.clipboard';
 
 /* ─── Constants ──────────────────────────────────────────── */
 
@@ -225,8 +229,71 @@ function TabItem({
    Hexagon FAB
    ──────────────────────────────────────────────────────── */
 
-function HexagonFAB({ onPress }: { onPress: () => void }) {
+function HexagonFAB({ onPress, segments }: { onPress: () => void, segments: string[] }) {
   const scaleAnim = useRef(new Animated.Value(1)).current;
+  const fadeAnim = useRef(new Animated.Value(0)).current; // 0: Ticket, 1: Calendar
+  
+  const [iconA, setIconA] = useState<IconName>('ticket.fill');
+  const [iconB, setIconB] = useState<IconName>('calendar.badge.plus');
+  
+  // Decide what icon should be shown based on route
+  const inTickets = segments.includes('tickets');
+  const inReserve = segments.includes('reserve');
+  const isIdle = !inTickets && !inReserve;
+
+  // Handle cross-fade animation
+  const animateTo = (value: number) => {
+    Animated.timing(fadeAnim, {
+      toValue: value,
+      duration: 800,
+      useNativeDriver: true,
+    }).start();
+  };
+
+  // Logic for transitions
+  useEffect(() => {
+    const isCaseta = segments[0] === '(tabs-caseta)';
+    const isVendedor = segments[0] === '(tabs-vendedor)';
+
+    if (isCaseta) {
+      const activeTab = segments[1] || 'index';
+      const icon = activeTab === 'index' ? 'square.and.arrow.up' : 'plus';
+      setIconA(icon);
+      setIconB(icon);
+      animateTo(0);
+      return;
+    }
+
+    if (isVendedor) {
+      setIconA('ticket.fill');
+      setIconB('ticket.fill');
+      animateTo(0);
+      return;
+    }
+
+    const isBarco = segments[0] === '(tabs-barco)';
+    if (isBarco) {
+      setIconA('pencil.and.list.clipboard');
+      setIconB('pencil.and.list.clipboard');
+      animateTo(0);
+      return;
+    }
+
+    if (inTickets) {
+      animateTo(0); // Show Icon A (Ticket)
+    } else if (inReserve) {
+      animateTo(1); // Show Icon B (Calendar)
+    } else if (isIdle) {
+      // Idle loop logic
+      let currentIdx = 0;
+      const interval = setInterval(() => {
+        currentIdx = currentIdx === 0 ? 1 : 0;
+        animateTo(currentIdx);
+      }, 4000); // Cycle every 4 seconds
+      
+      return () => clearInterval(interval);
+    }
+  }, [inTickets, inReserve, isIdle, segments]);
 
   const handlePressIn = useCallback(() => {
     Animated.spring(scaleAnim, {
@@ -245,6 +312,16 @@ function HexagonFAB({ onPress }: { onPress: () => void }) {
       bounciness: 10,
     }).start();
   }, []);
+
+  // Interpolations for cross-fade
+  const opacityA = fadeAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [1, 0],
+  });
+  const opacityB = fadeAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, 1],
+  });
 
   return (
     <Pressable
@@ -274,11 +351,23 @@ function HexagonFAB({ onPress }: { onPress: () => void }) {
         </Svg>
 
         <View style={styles.fabIconOverlay}>
-          <IconSymbol
-            name="creditcard.fill"
-            color={PerlaColors.onTertiary}
-            size={24}
-          />
+          {/* Icon A: Ticket */}
+          <Animated.View style={{ opacity: opacityA, position: 'absolute' }}>
+            <IconSymbol
+              name={iconA as any}
+              color={PerlaColors.onTertiary}
+              size={26}
+            />
+          </Animated.View>
+          
+          {/* Icon B: Calendar */}
+          <Animated.View style={{ opacity: opacityB, position: 'absolute' }}>
+            <IconSymbol
+              name={iconB as any}
+              color={PerlaColors.onTertiary}
+              size={26}
+            />
+          </Animated.View>
         </View>
       </Animated.View>
     </Pressable>
@@ -297,15 +386,31 @@ export function CustomTabBar({
   const router = useRouter();
   const segments = useSegments();
 
-  const handleFabPress = useCallback(() => {
+  const handleFabPress = useCallback(async () => {
     const roleSegment = segments[0] as string;
 
     if (roleSegment === "(tabs-comprador)") {
-      router.push("/(tabs-comprador)/tickets");
+      try {
+        const tickets = await obtenerMisReservaciones();
+        if (tickets && tickets.length > 0) {
+          router.push("/(tabs-comprador)/tickets");
+        } else {
+          router.push("/(tabs-comprador)/reserve");
+        }
+      } catch (err) {
+        console.error("Error checking tickets:", err);
+        router.push("/(tabs-comprador)/reserve");
+      }
     } else if (roleSegment === "(tabs-caseta)") {
-      router.push("/(tabs-caseta)/trips");
+      // Contextual action for Caseta - emit specific event based on tab
+      const activeTab = segments[1] || 'index';
+      globalEvents.emit(`fab-press-${activeTab}`);
     } else if (roleSegment === "(tabs-vendedor)") {
-      router.push("/(tabs-vendedor)" as any);
+      // Hexagon for Vendedor navigates to Panel (Quick Sale)
+      router.push("/(tabs-vendedor)/" as any);
+    } else if (roleSegment === "(tabs-barco)") {
+      // Hexagon for Barco navigates to Manifiesto
+      router.push("/(tabs-barco)/manifest" as any);
     } else {
       console.log("No specific action mapped for:", roleSegment);
     }
@@ -314,7 +419,7 @@ export function CustomTabBar({
   return (
     <View style={styles.wrapper} pointerEvents="box-none">
       <View style={styles.fabPositioner} pointerEvents="box-none">
-        <HexagonFAB onPress={handleFabPress} />
+        <HexagonFAB onPress={handleFabPress} segments={segments} />
       </View>
 
       <View style={styles.barOuter}>
@@ -331,7 +436,45 @@ export function CustomTabBar({
 
           <View style={styles.barContent}>
             {state.routes
-              .filter((route) => (descriptors[route.key].options as any).href !== null)
+              .filter((route) => {
+                // EXPLICIT FILTER: Never show utility routes or segment-based utility names
+                if (
+                  route.name === 'new-reservation' || 
+                  route.name.includes('new-reservation') ||
+                  route.name.startsWith('+')
+                ) {
+                  return false;
+                }
+
+                const options = descriptors[route.key].options;
+                
+                // CRITICAL: Respect 'href: null' or hidden button options
+                const isHidden = 
+                  (options as any).href === null || 
+                  options.tabBarButton === (() => null);
+                
+                if (isHidden) return false;
+
+                const roleSegment = segments[0];
+                
+                // Role-specific filtering
+                if (roleSegment === "(tabs-comprador)") {
+                  // Comprador only sees Statistics (index) and Settings
+                  return route.name === "index" || route.name === "settings";
+                }
+
+                if (roleSegment === "(tabs-vendedor)") {
+                  // Vendedor only sees Sales (Ventas) and Settings (Config)
+                  return route.name === "sales" || route.name === "settings";
+                }
+
+                if (roleSegment === "(tabs-barco)") {
+                  // Barco only sees Viaje (index) and Settings (Config)
+                  return route.name === "index" || route.name === "settings";
+                }
+
+                return true;
+              })
               .map((route, index, activeRoutes) => {
                 const descriptor = descriptors[route.key];
                 const isFocused =

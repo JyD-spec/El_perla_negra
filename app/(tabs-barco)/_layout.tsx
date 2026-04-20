@@ -20,17 +20,16 @@ export default function BarcoTabLayout() {
         }}
       />
       <Tabs.Screen
-        name="manifest"
-        options={{
-          title: 'Manifiesto',
-          tabBarIcon: ({ color }) => <IconSymbol size={22} name="person.3.fill" color={color} />,
-        }}
-      />
-      <Tabs.Screen
         name="settings"
         options={{
           title: 'Config',
           tabBarIcon: ({ color }) => <IconSymbol size={22} name="gearshape.fill" color={color} />,
+        }}
+      />
+      <Tabs.Screen
+        name="manifest"
+        options={{
+          href: null,
         }}
       />
     </Tabs>

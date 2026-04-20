@@ -44,8 +44,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     initialized: false,
   });
 
-  // Ref to track the user ID currently being fetched to prevent duplicates
+  // Refs to track current state without triggering effect re-runs
+  const stateRef = useRef<AuthState>(state);
   const fetchingProfileFor = useRef<string | null>(null);
+
+  // Keep stateRef in sync with state
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
 
   /**
    * Fetch the role and profile for the given user.
@@ -100,10 +106,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         const user = session?.user ?? null;
+        const currentState = stateRef.current;
 
         // 1. Identify context
         const isExplicitLogin = event === 'SIGNED_IN';
-        const isInitialLoad = event === 'INITIAL_SESSION' && !state.initialized;
+        const isInitialLoad = event === 'INITIAL_SESSION' && !currentState.initialized;
         
         // We only show the global "ActivityIndicator" for initial boot or explicit login.
         // TOKEN_REFRESHED or background resumes should be SILENT.
@@ -124,7 +131,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           
           // Optimization: If we already have the profile for this user and it's not an explicit login, 
           // we don't need to block the UI or re-fetch immediately.
-          if (state.user?.id === user.id && (state.rango || state.cliente) && !isExplicitLogin) {
+          if (currentState.user?.id === user.id && (currentState.rango || currentState.cliente) && !isExplicitLogin) {
             if (shouldLockUI) {
               setState(prev => ({ ...prev, loading: false, initialized: true }));
             }
@@ -134,7 +141,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           fetchingProfileFor.current = user.id;
           
           try {
-            // Add a safety race to prevent infinite hanging on bad networks
             const timeoutPromise = new Promise((_, reject) => 
               setTimeout(() => reject(new Error('Timeout fetching profile')), 8000)
             );
@@ -142,7 +148,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             await Promise.race([fetchProfile(user), timeoutPromise]);
           } catch (err) {
             console.error('Profile fetch failed or timed out:', err);
-            // Ensure we at least let the user into the app as Comprador if it fails
             setState(prev => ({ ...prev, loading: false, initialized: true }));
           } finally {
             fetchingProfileFor.current = null;
@@ -162,7 +167,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     );
 
     return () => subscription.unsubscribe();
-  }, [fetchProfile, state.initialized, state.user?.id, state.rango, state.cliente]);
+  }, [fetchProfile]); // Note: dependency array is now stable
 
   /* ── Actions ──────────────────────────────────────── */
   

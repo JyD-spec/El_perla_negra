@@ -13,7 +13,9 @@ import { PerlaColors } from '@/constants/theme';
 import { useAuth } from '@/src/contexts/AuthContext';
 import { useToast } from '@/src/contexts/ToastContext';
 import { obtenerMisReservaciones } from '@/src/services/reservaciones.service';
-import type { ReservacionConDetalles, EstadoPase } from '@/src/lib/database.types';
+import type { ReservacionConDetalles } from '@/src/lib/database.types';
+import { FlowToggle } from '@/components/ui/FlowToggle';
+import { IconSymbol } from '@/components/ui/icon-symbol';
 
 /* ────────────────────────────────────────────────────────────
    Tickets Screen – Mis Boletos
@@ -116,6 +118,8 @@ export default function TicketsScreen() {
       <Text style={styles.subtitle}>
         Historial de aventuras y pases de abordar
       </Text>
+
+      <FlowToggle activeTab="tickets" />
 
       {/* ── Empty State ──────────────────────────────── */}
       {reservaciones.length === 0 && (

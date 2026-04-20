@@ -24,6 +24,7 @@ import { supabase } from '@/src/lib/supabase';
 import { obtenerViajesDelDia, obtenerCupoViaje } from '@/src/services/viajes.service';
 import { crearReservacion } from '@/src/services/reservaciones.service';
 import type { Paquete, Viaje } from '@/src/lib/database.types';
+import { FlowToggle } from '@/components/ui/FlowToggle';
 
 /* ────────────────────────────────────────────────────────────
    Types
@@ -242,6 +243,8 @@ export default function ReservarScreen() {
         <Text style={styles.screenSubtitle}>
           Prepara tu tripulación para zarpar
         </Text>
+
+        <FlowToggle activeTab="reserve" />
 
         {/* ════════════════════════════════════════════════
             SECTION 1: Paquete

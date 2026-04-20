@@ -27,6 +27,9 @@ const MAPPING = {
   'list.clipboard.fill': 'assignment',
   'ferry.fill': 'directions-boat',
   'person.3.fill': 'groups',
+  'plus': 'add',
+  'square.and.arrow.up': 'ios-share',
+  'pencil.and.list.clipboard': 'assignment',
 } as IconMapping;
 
 /**

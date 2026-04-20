@@ -15,7 +15,7 @@ export default function CasetaTabLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: 'Dashboard',
+          title: 'Estadísticas',
           tabBarIcon: ({ color }) => <IconSymbol size={22} name="chart.bar.fill" color={color} />,
         }}
       />
@@ -38,6 +38,12 @@ export default function CasetaTabLayout() {
         options={{
           title: 'Config',
           tabBarIcon: ({ color }) => <IconSymbol size={22} name="gearshape.fill" color={color} />,
+        }}
+      />
+      <Tabs.Screen
+        name="new-reservation"
+        options={{
+          href: null,
         }}
       />
     </Tabs>
