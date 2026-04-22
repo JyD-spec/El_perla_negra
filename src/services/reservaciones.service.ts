@@ -137,6 +137,7 @@ export async function obtenerMisVentas(fecha?: string) {
 export async function crearReservacion(datos: {
   nombreCliente: string;
   telefono: string;
+  email?: string;
   idPaquete: number;
   idViaje: number;
   cantidadPersonas: number;
@@ -163,6 +164,7 @@ export async function crearReservacion(datos: {
           auth_id: datos.authId,
           nombre_completo: datos.nombreCliente,
           telefono: datos.telefono,
+          email: datos.email || null,
           es_registrado: true,
         })
         .select('id_cliente')
@@ -177,6 +179,7 @@ export async function crearReservacion(datos: {
       .insert({
         nombre_completo: datos.nombreCliente,
         telefono: datos.telefono,
+        email: datos.email || null,
         es_registrado: false,
       })
       .select('id_cliente')

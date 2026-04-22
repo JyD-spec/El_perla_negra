@@ -629,6 +629,14 @@ function TripModal({
         setDate(vDate);
         setEstado(viaje.estado_viaje || "Programado");
         setSelectedBarco(viaje.id_embarcacion);
+
+        if (viaje.tripulacion_asignada) {
+          setSelectedEncargados(viaje.tripulacion_asignada);
+        } else if (viaje.id_encargado_abordaje) {
+          setSelectedEncargados([viaje.id_encargado_abordaje]);
+        } else {
+          setSelectedEncargados([]);
+        }
       } else {
         // Modo Creación: ajustar a la hora actual redondeada
         const now = new Date();
@@ -636,21 +644,18 @@ function TripModal({
         now.setSeconds(0);
         setDate(now);
         setEstado("Programado");
-        setSelectedBarco(null);
-      }
-
-      if (viaje && viaje.tripulacion_asignada) {
-        setSelectedEncargados(viaje.tripulacion_asignada);
-      } else if (viaje && viaje.id_encargado_abordaje) {
-        setSelectedEncargados([viaje.id_encargado_abordaje]);
-      } else if (!viaje && selectedBarco === null && embarcaciones.length > 0) {
-        setSelectedBarco(embarcaciones[0].id_embarcacion);
+        
+        // Si no hay barco seleccionado aún (al abrir), poner el primero
+        if (selectedBarco === null && embarcaciones.length > 0) {
+          setSelectedBarco(embarcaciones[0].id_embarcacion);
+        }
       }
     }
-  }, [visible, viaje, embarcaciones, selectedBarco]);
+  }, [visible, viaje]); // Quitamos selectedBarco y embarcaciones para evitar bucles
 
+  // Solo cargar tripulación default al CAMBIAR de barco en modo creación
   useEffect(() => {
-    if (!viaje && selectedBarco && embarcaciones.length > 0) {
+    if (!viaje && selectedBarco && visible) {
       const barcoInfo = embarcaciones.find(
         (b) => b.id_embarcacion === selectedBarco,
       );
@@ -660,7 +665,7 @@ function TripModal({
         setSelectedEncargados([]);
       }
     }
-  }, [selectedBarco, embarcaciones, viaje]);
+  }, [selectedBarco]); // Solo depender del barco seleccionado
 
   const toggleEncargado = (id: string) => {
     setSelectedEncargados((prev) => {

@@ -39,7 +39,8 @@
           }
         }
       ],
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      "@stripe/stripe-react-native"
     ],
     "experiments": {
       "typedRoutes": true,

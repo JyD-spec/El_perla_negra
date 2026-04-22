@@ -10,6 +10,7 @@ import {
   KeyboardAvoidingView,
   ActivityIndicator,
 } from 'react-native';
+import { useStripe } from '@stripe/stripe-react-native';
 import DateTimePicker, {
   type DateTimePickerEvent,
 } from '@react-native-community/datetimepicker';
@@ -59,6 +60,7 @@ export default function CasetaNewReservationScreen() {
   const [personas, setPersonas] = useState<string>('1');
   const [nombre, setNombre] = useState('');
   const [telefono, setTelefono] = useState('');
+  const [email, setEmail] = useState('');
 
   /* ─── Date state ───────────────────────────────────────── */
   const [date, setDate] = useState<Date>(new Date());
@@ -134,6 +136,8 @@ export default function CasetaNewReservationScreen() {
     []
   );
 
+  const { initPaymentSheet, presentPaymentSheet } = useStripe();
+
   const formatDate = useCallback((d: Date) => {
     return d.toLocaleDateString('es-MX', {
       weekday: 'long',
@@ -148,24 +152,90 @@ export default function CasetaNewReservationScreen() {
     if (!selectedViaje) return toast.warning('Selecciona un horario.');
     if (!nombre.trim()) return toast.warning('Ingresa el nombre del cliente.');
     if (!telefono.trim() || telefono.length < 10) return toast.warning('Ingresa un teléfono válido.');
+    if (paymentMethod === 'tarjeta' && !email.trim()) return toast.warning('Ingresa el correo para el recibo.');
 
     const disp = selectedViaje.embarcacion.capacidad_maxima - (cupos[selectedViaje.id_viaje] ?? 0);
     if (personasNum > disp) return toast.warning(`Cupo insuficiente (Máx: ${disp}).`);
 
     setSaving(true);
     try {
-      await crearReservacion({
+      if (paymentMethod === 'tarjeta') {
+        // 1. Obtener sesión de pago desde Supabase Edge Function
+        const { data: sheetData, error: sheetError } = await supabase.functions.invoke('stripe-payment-sheet', {
+          body: {
+            amount: total,
+            currency: 'mxn',
+            email: email.trim(),
+            name: nombre.trim(),
+            phone: telefono.trim(),
+          }
+        });
+
+        if (sheetError) throw new Error(sheetError.message || 'Error al conectar con Stripe');
+
+        // 2. Inicializar el Payment Sheet
+        const { error: initError } = await initPaymentSheet({
+          merchantDisplayName: 'El Perla Negra',
+          customerId: sheetData.customer,
+          customerEphemeralKeySecret: sheetData.ephemeralKey,
+          paymentIntentClientSecret: sheetData.paymentIntent,
+          allowsDelayedPaymentMethods: true,
+          defaultBillingDetails: {
+            name: nombre.trim(),
+            email: email.trim(),
+            phone: telefono.trim(),
+          },
+          appearance: {
+            colors: {
+              primary: PerlaColors.tertiary,
+              background: PerlaColors.surfaceContainerLow,
+              componentBackground: PerlaColors.surfaceContainer,
+              componentDivider: PerlaColors.outlineVariant,
+              primaryText: PerlaColors.onSurface,
+              secondaryText: PerlaColors.onSurfaceVariant,
+              placeholderText: PerlaColors.onSurfaceVariant + '60',
+              icon: PerlaColors.tertiary,
+            },
+            shapes: { borderRadius: 12 },
+          }
+        });
+
+        if (initError) throw initError;
+
+        // 3. Presentar el formulario de pago
+        const { error: presentError } = await presentPaymentSheet();
+        if (presentError) {
+          if (presentError.code === 'Canceled') {
+            setSaving(false);
+            return;
+          }
+          throw presentError;
+        }
+      }
+
+      // 4. Crear la reservación
+      const res = await crearReservacion({
         nombreCliente: nombre.trim(),
         telefono: telefono.trim(),
+        email: email.trim(),
         idPaquete: selectedPackage,
         idViaje: selectedViaje.id_viaje,
         cantidadPersonas: personasNum,
       });
 
+      // 5. Registrar el pago si fue exitoso con tarjeta
+      if (paymentMethod === 'tarjeta') {
+        await registrarPago({
+          id_reservacion: res.id_reservacion,
+          metodo_pago: 'Stripe',
+          monto_pagado: total,
+        });
+      }
+
       toast.success('Reservación creada exitosamente.');
       router.back();
     } catch (err: any) {
-      toast.error('Error al crear reservación.');
+      toast.error(err.message || 'Error al procesar la operación.');
       console.error(err);
     } finally {
       setSaving(false);
@@ -229,11 +299,42 @@ export default function CasetaNewReservationScreen() {
             maxLength={10}
             placeholderTextColor={PerlaColors.onSurfaceVariant + '60'}
           />
+          <Text style={[styles.fieldLabel, { marginTop: 16 }]}>Email (para recibo)</Text>
+          <TextInput
+            style={styles.textInput}
+            value={email}
+            onChangeText={setEmail}
+            placeholder="ejemplo@correo.com"
+            keyboardType="email-address"
+            autoCapitalize="none"
+            placeholderTextColor={PerlaColors.onSurfaceVariant + '60'}
+          />
         </View>
 
-        {/* 2. Paquete */}
+        {/* 2. Pago */}
         <View style={styles.sectionHeader}>
           <View style={styles.sectionNumber}><Text style={styles.sectionNumberText}>2</Text></View>
+          <Text style={styles.sectionLabel}>Método de Pago</Text>
+        </View>
+
+        <View style={styles.paymentMethods}>
+          <Pressable 
+            style={[styles.paymentBtn, paymentMethod === 'efectivo' && styles.paymentBtnActive]}
+            onPress={() => setPaymentMethod('efectivo')}
+          >
+            <Text style={[styles.paymentBtnText, paymentMethod === 'efectivo' && styles.paymentBtnTextActive]}>💵 Efectivo</Text>
+          </Pressable>
+          <Pressable 
+            style={[styles.paymentBtn, paymentMethod === 'tarjeta' && styles.paymentBtnActive]}
+            onPress={() => setPaymentMethod('tarjeta')}
+          >
+            <Text style={[styles.paymentBtnText, paymentMethod === 'tarjeta' && styles.paymentBtnTextActive]}>💳 Tarjeta</Text>
+          </Pressable>
+        </View>
+
+        {/* 3. Paquete */}
+        <View style={styles.sectionHeader}>
+          <View style={styles.sectionNumber}><Text style={styles.sectionNumberText}>3</Text></View>
           <Text style={styles.sectionLabel}>Paquete y Tripulación</Text>
         </View>
 
@@ -272,9 +373,10 @@ export default function CasetaNewReservationScreen() {
           })}
         </View>
 
-        {/* 3. Viaje */}
+
+        {/* 4. Viaje */}
         <View style={styles.sectionHeader}>
-          <View style={styles.sectionNumber}><Text style={styles.sectionNumberText}>3</Text></View>
+          <View style={styles.sectionNumber}><Text style={styles.sectionNumberText}>4</Text></View>
           <Text style={styles.sectionLabel}>Fecha y Horario</Text>
         </View>
 
@@ -377,4 +479,11 @@ const styles = StyleSheet.create({
   summaryVal: { fontFamily: 'Newsreader-Bold', fontSize: 24, color: PerlaColors.tertiary },
   confirmBtn: { backgroundColor: PerlaColors.tertiary, padding: 18, borderRadius: 14, alignItems: 'center' },
   confirmBtnText: { color: PerlaColors.onTertiary, fontWeight: 'bold', fontSize: 16 },
+
+  /* Payment Methods */
+  paymentMethods: { flexDirection: 'row', gap: 12, marginBottom: 12 },
+  paymentBtn: { flex: 1, padding: 16, borderRadius: 12, backgroundColor: PerlaColors.surfaceContainerLow, alignItems: 'center', borderWidth: 1, borderColor: 'transparent' },
+  paymentBtnActive: { borderColor: PerlaColors.tertiary, backgroundColor: PerlaColors.tertiary + '08' },
+  paymentBtnText: { fontFamily: 'Manrope-Bold', color: PerlaColors.onSurfaceVariant, fontSize: 14 },
+  paymentBtnTextActive: { color: PerlaColors.tertiary },
 });

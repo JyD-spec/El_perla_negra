@@ -12,6 +12,7 @@ import {
   View,
 } from "react-native";
 import "react-native-reanimated";
+import { StripeProvider } from "@stripe/stripe-react-native";
 
 // 1. IMPORTA REACT QUERY AQUÍ
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -146,15 +147,20 @@ export default function RootLayout() {
   return (
     // 3. ENVUELVE TODO CON EL PROVIDER
     <QueryClientProvider client={queryClient}>
-      <ToastProvider>
-        <AuthProvider>
-          <ThemeProvider value={PerlaDarkTheme}>
-            <OfflineBanner />
-            <RootNavigator />
-            <StatusBar style="light" />
-          </ThemeProvider>
-        </AuthProvider>
-      </ToastProvider>
+      <StripeProvider
+        publishableKey={process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY || ""}
+        merchantIdentifier="merchant.com.perlanegra" // Requerido para Apple Pay
+      >
+        <ToastProvider>
+          <AuthProvider>
+            <ThemeProvider value={PerlaDarkTheme}>
+              <OfflineBanner />
+              <RootNavigator />
+              <StatusBar style="light" />
+            </ThemeProvider>
+          </AuthProvider>
+        </ToastProvider>
+      </StripeProvider>
     </QueryClientProvider>
   );
 }
