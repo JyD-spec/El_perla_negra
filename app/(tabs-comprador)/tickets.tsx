@@ -16,6 +16,7 @@ import { obtenerMisReservaciones } from '@/src/services/reservaciones.service';
 import type { ReservacionConDetalles } from '@/src/lib/database.types';
 import { FlowToggle } from '@/components/ui/FlowToggle';
 import { IconSymbol } from '@/components/ui/icon-symbol';
+import { format12h } from '@/src/lib/time';
 
 /* ────────────────────────────────────────────────────────────
    Tickets Screen – Mis Boletos
@@ -160,8 +161,8 @@ function TicketCard({ reservacion: r }: { reservacion: ReservacionConDetalles })
     : '—';
 
   const horaViaje = r.viaje?.hora_salida_programada
-    ? r.viaje.hora_salida_programada.slice(0, 5)
-    : '—';
+    ? format12h(r.viaje.hora_salida_programada)
+    : '—:—';
 
   const barcoNombre = (r.viaje as any)?.embarcacion?.nombre ?? 'Embarcación';
 

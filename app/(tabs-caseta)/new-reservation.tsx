@@ -20,8 +20,11 @@ import { PerlaColors } from '@/constants/theme';
 import { useToast } from '@/src/contexts/ToastContext';
 import { supabase } from '@/src/lib/supabase';
 import { obtenerViajesDelDia, obtenerCupoViaje } from '@/src/services/viajes.service';
+import { registrarPago } from '@/src/services/pagos.service';
 import { crearReservacion } from '@/src/services/reservaciones.service';
 import type { Paquete, Viaje } from '@/src/lib/database.types';
+import { FlowToggle } from '@/components/ui/FlowToggle';
+import { format12h } from '@/src/lib/time';
 
 /* ────────────────────────────────────────────────────────────
    Types
@@ -302,7 +305,7 @@ export default function CasetaNewReservationScreen() {
                 onPress={() => setSelectedViaje(v)}
               >
                 <View>
-                  <Text style={styles.tripTime}>{v.hora_salida_programada.slice(0, 5)} hrs</Text>
+                  <Text style={styles.tripTime}>{format12h(v.hora_salida_programada)}</Text>
                   <Text style={styles.tripBoat}>{v.embarcacion.nombre}</Text>
                 </View>
                 <Text style={styles.tripSpots}>{isFull ? 'Agotado' : `${disp} disp.`}</Text>

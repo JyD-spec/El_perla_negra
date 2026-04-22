@@ -13,10 +13,13 @@ import {
 } from "react-native";
 import "react-native-reanimated";
 
+// 1. IMPORTA REACT QUERY AQUÍ
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+
+import { OfflineBanner } from "@/components/ui/OfflineBanner";
 import { PerlaColors } from "@/constants/theme";
 import { AuthProvider, useAuth } from "@/src/contexts/AuthContext";
 import { ToastProvider } from "@/src/contexts/ToastContext";
-import { OfflineBanner } from "@/components/ui/OfflineBanner";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -33,6 +36,9 @@ const PerlaDarkTheme = {
     notification: PerlaColors.error,
   },
 };
+
+// 2. CREA LA INSTANCIA DEL CLIENTE (Afuera de los componentes)
+const queryClient = new QueryClient();
 
 /* ── Auth-gated navigation ─────────────────────────────── */
 
@@ -53,7 +59,7 @@ function RootNavigator() {
     if (!initialized || loading) return;
 
     const inAuthGroup = segments[0] === "(auth)";
-    
+
     if (!session) {
       // 2. Force login if no session
       if (!inAuthGroup) {
@@ -61,9 +67,8 @@ function RootNavigator() {
       }
     } else {
       // 3. Authenticated - determine target based on role
-      const targetGroup = ROLE_ROUTES[rango as keyof typeof ROLE_ROUTES] || "(tabs-comprador)";
-
-      const inAuthGroup = segments[0] === "(auth)";
+      const targetGroup =
+        ROLE_ROUTES[rango as keyof typeof ROLE_ROUTES] || "(tabs-comprador)";
 
       // Rule 1: Universal - Always move AWAY from auth if logged in
       if (inAuthGroup) {
@@ -78,9 +83,8 @@ function RootNavigator() {
     }
   }, [session, rango, initialized, segments[0], loading]);
 
-  // 5. Performance: Only show the global spinner during the VERY FIRST cold boot.
-  // Once initialized, don't unmount the entire tree even if loading is true (e.g. background syncs)
-  if (!initialized) {
+  // 5. Performance: Only show the global spinner during the VERY FIRST cold boot or profile fetch.
+  if (!initialized || loading) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color={PerlaColors.tertiary} />
@@ -97,7 +101,6 @@ function RootNavigator() {
         <Stack.Screen name="(tabs-caseta)" />
         <Stack.Screen name="(tabs-barco)" />
         <Stack.Screen name="dev" />
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
       </Stack>
 
       {/* ── Role Dev Support ── */}
@@ -141,15 +144,18 @@ export default function RootLayout() {
   }
 
   return (
-    <ToastProvider>
-      <AuthProvider>
-        <ThemeProvider value={PerlaDarkTheme}>
-          <OfflineBanner />
-          <RootNavigator />
-          <StatusBar style="light" />
-        </ThemeProvider>
-      </AuthProvider>
-    </ToastProvider>
+    // 3. ENVUELVE TODO CON EL PROVIDER
+    <QueryClientProvider client={queryClient}>
+      <ToastProvider>
+        <AuthProvider>
+          <ThemeProvider value={PerlaDarkTheme}>
+            <OfflineBanner />
+            <RootNavigator />
+            <StatusBar style="light" />
+          </ThemeProvider>
+        </AuthProvider>
+      </ToastProvider>
+    </QueryClientProvider>
   );
 }
 

@@ -25,6 +25,7 @@ import { obtenerViajesDelDia, obtenerCupoViaje } from '@/src/services/viajes.ser
 import { crearReservacion } from '@/src/services/reservaciones.service';
 import type { Paquete, Viaje } from '@/src/lib/database.types';
 import { FlowToggle } from '@/components/ui/FlowToggle';
+import { format12h } from '@/src/lib/time';
 
 /* ────────────────────────────────────────────────────────────
    Types
@@ -370,7 +371,7 @@ export default function ReservarScreen() {
                       {isSelected && <View style={styles.radioInner} />}
                     </View>
                     <View style={{ flex: 1 }}>
-                      <Text style={styles.packageName}>🚢 {v.hora_salida_programada.slice(0, 5)} hrs</Text>
+                      <Text style={styles.packageName}>🚢 {format12h(v.hora_salida_programada)}</Text>
                       <Text style={styles.packageDesc}>{v.embarcacion.nombre}</Text>
                     </View>
                   </View>

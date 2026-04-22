@@ -34,6 +34,10 @@ const MAPPING = {
   'tag.fill': 'local-offer',
   'trash.fill': 'delete-outline',
   'chevron.left': 'chevron-left',
+  'key.fill': 'vpn-key',
+  'ellipsis.circle.fill': 'more-vert',
+  'wifi.exclamationmark': 'wifi-off',
+  'xmark': 'close',
 } as IconMapping;
 
 /**

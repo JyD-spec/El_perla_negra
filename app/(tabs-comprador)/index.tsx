@@ -134,7 +134,7 @@ export default function HomeScreen() {
             {/* CTA Button */}
             <Pressable
               style={styles.ctaButton}
-              onPress={() => router.push({ pathname: '/reserve', params: { paquete: 'comida' } })}
+              onPress={() => router.push({ pathname: '/(tabs-comprador)/reserve', params: { paquete: 'comida' } })}
             >
               <Text style={styles.ctaText}>Reservar mi Aventura</Text>
             </Pressable>
@@ -189,7 +189,7 @@ export default function HomeScreen() {
                 </View>
                 <Pressable
                   style={styles.elegirButton}
-                  onPress={() => router.push({ pathname: '/reserve', params: { paquete: 'comida' } })}
+                  onPress={() => router.push({ pathname: '/(tabs-comprador)/reserve', params: { paquete: 'comida' } })}
                 >
                   <Text style={styles.elegirText}>Reservar →</Text>
                 </Pressable>
@@ -254,7 +254,7 @@ export default function HomeScreen() {
                   onPress={() => {
                     if (selectedDrink) {
                       router.push({
-                        pathname: '/reserve',
+                        pathname: '/(tabs-comprador)/reserve',
                         params: { paquete: 'bebidas', bebida: selectedDrink },
                       });
                     }
@@ -327,7 +327,7 @@ export default function HomeScreen() {
                 <View style={styles.expandedActions}>
                   <Pressable
                     style={styles.elegirButton}
-                    onPress={() => router.push({ pathname: '/reserve', params: { paquete: 'paseo' } })}
+                    onPress={() => router.push({ pathname: '/(tabs-comprador)/reserve', params: { paquete: 'paseo' } })}
                   >
                     <Text style={styles.elegirText}>Elegir Paquete →</Text>
                   </Pressable>

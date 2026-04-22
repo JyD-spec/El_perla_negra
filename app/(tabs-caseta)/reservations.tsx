@@ -21,6 +21,7 @@ import {
   verificarPIN,
 } from '@/src/services/reservaciones.service';
 import type { ReservacionConDetalles, EstadoPase } from '@/src/lib/database.types';
+import { format12h } from '@/src/lib/time';
 
 /* ────────────────────────────────────────────────────────────
    Caseta – Reservaciones
@@ -225,7 +226,7 @@ export default function CasetaReservationsScreen() {
                 🎫 {r.paquete?.descripcion ?? 'Paquete'}
               </Text>
               <Text style={styles.resInfo}>
-                🕐 {(r.viaje as any)?.hora_salida_programada?.slice(0, 5) ?? '—'}
+                🕐 {format12h((r.viaje as any)?.hora_salida_programada)}
               </Text>
               <Text style={[styles.resInfo, { color: PerlaColors.tertiary }]}>
                 ${r.total_pagar.toFixed(0)}

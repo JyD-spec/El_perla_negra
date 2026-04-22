@@ -11,6 +11,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PerlaColors } from '@/constants/theme';
 import { obtenerMisVentas } from '@/src/services/reservaciones.service';
 import type { ReservacionConDetalles } from '@/src/lib/database.types';
+import { format12h } from '@/src/lib/time';
 
 /* ────────────────────────────────────────────────────────────
    Vendedor – Historial de Ventas del Día
@@ -100,7 +101,7 @@ export default function VendedorSalesScreen() {
           </Text>
           <View style={styles.saleFooter}>
             <Text style={styles.saleTime}>
-              🕐 {(v.viaje as any)?.hora_salida_programada?.slice(0, 5) ?? '—'}
+              🕐 {format12h((v.viaje as any)?.hora_salida_programada)}
             </Text>
             <View style={[
               styles.saleBadge,

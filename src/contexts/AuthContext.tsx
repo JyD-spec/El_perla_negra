@@ -65,7 +65,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         .rpc('obtener_mi_rango');
 
       if (!rangoError && rangoData) {
-        // User is an employee (Caseta, Vendedor, or Barco)
+        // Fetch their 'activo' state
+        const { data: userData } = await supabase
+          .from('usuario')
+          .select('activo')
+          .eq('id_usuario', user.id)
+          .maybeSingle();
+
+        if (userData && userData.activo === false) {
+          await supabase.auth.signOut();
+          throw new Error("Membresía o cuenta desactivada");
+        }
+
+        // User is an employee
         setState(prev => ({
           ...prev,
           rango: rangoData as RangoUsuario,

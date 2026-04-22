@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo, createElement } from 'react';
 import {
   StyleSheet,
   View,
@@ -8,7 +8,9 @@ import {
   TextInput,
   ActivityIndicator,
   Alert,
+  Platform,
 } from 'react-native';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PerlaColors } from '@/constants/theme';
 import { useAuth } from '@/src/contexts/AuthContext';
@@ -17,6 +19,7 @@ import { crearReservacion } from '@/src/services/reservaciones.service';
 import { registrarPago } from '@/src/services/pagos.service';
 import { supabase } from '@/src/lib/supabase';
 import type { Paquete, Viaje } from '@/src/lib/database.types';
+import { format12h } from '@/src/lib/time';
 
 /* ────────────────────────────────────────────────────────────
    Vendedor – Panel de Venta Rápida
@@ -51,15 +54,33 @@ export default function VendedorPanelScreen() {
   // Result
   const [pinGenerado, setPinGenerado] = useState<string | null>(null);
 
+  /* ── Date Carousel State ──────────────────────── */
+  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [searchText, setSearchText] = useState('');
+
+  const getLocalDateString = useCallback((d: Date) => {
+    return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().split('T')[0];
+  }, []);
+
+  // Fetch Packages once
   useEffect(() => {
     (async () => {
       try {
-        const [viajesData, paqData] = await Promise.all([
-          obtenerViajesDelDia(),
-          supabase.from('paquete').select('*').then(r => r.data as Paquete[]),
-        ]);
+        const { data } = await supabase.from('paquete').select('*');
+        setPaquetes((data as Paquete[]) ?? []);
+      } catch (err) { console.error(err); }
+    })();
+  }, []);
+
+  // Fetch Trips on Date changes
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      try {
+        const dateStr = getLocalDateString(selectedDate);
+        const viajesData = await obtenerViajesDelDia(dateStr);
         setViajes(viajesData as ViajeConEmb[]);
-        setPaquetes(paqData ?? []);
 
         const cupoResults = await Promise.all(
           viajesData.map(v => obtenerCupoViaje(v.id_viaje).then(c => ({ id: v.id_viaje, cupo: c })))
@@ -70,7 +91,23 @@ export default function VendedorPanelScreen() {
       } catch (err) { console.error(err); }
       finally { setLoading(false); }
     })();
-  }, []);
+  }, [selectedDate, getLocalDateString]);
+
+  // Compute active trips: all trips that haven't departed yet
+  const activeTripsList = useMemo(() => {
+    return viajes
+      .filter(v => ['Programado', 'Retrasado', 'Abordando'].includes(v.estado_viaje ?? 'Programado'))
+      .sort((a, b) => a.hora_salida_programada.localeCompare(b.hora_salida_programada));
+  }, [viajes]);
+
+  const filteredTrips = useMemo(() => {
+    if (!searchText) return activeTripsList;
+    const lowerSearch = searchText.toLowerCase();
+    return activeTripsList.filter(v => 
+      v.embarcacion.nombre.toLowerCase().includes(lowerSearch) ||
+      format12h(v.hora_salida_programada).toLowerCase().includes(lowerSearch)
+    );
+  }, [activeTripsList, searchText]);
 
   const cantNum = parseInt(cantidad) || 1;
   const subtotal = (selectedPaquete?.costo_persona ?? 0) * cantNum;
@@ -176,8 +213,108 @@ export default function VendedorPanelScreen() {
       {/* ── Step 1: Viaje ─────────────────────────── */}
       {step === 'viaje' && (
         <View>
-          <Text style={styles.stepTitle}>Selecciona el Viaje</Text>
-          {viajes.filter(v => v.estado_viaje === 'Programado' || v.estado_viaje === 'Retrasado').map(v => {
+          {/* Carousel */}
+          <View style={styles.carouselHeader}>
+            <Pressable 
+              disabled={getLocalDateString(selectedDate) <= getLocalDateString(new Date())}
+              style={({pressed}) => [
+                styles.carouselBtn, 
+                (pressed || getLocalDateString(selectedDate) <= getLocalDateString(new Date())) && { opacity: 0.3 }
+              ]}
+              onPress={() => {
+                const d = new Date(selectedDate);
+                d.setDate(d.getDate() - 1);
+                setSelectedDate(d);
+              }}
+            >
+              <Text style={styles.carouselBtnText}>‹</Text>
+            </Pressable>
+
+            <View style={styles.carouselCenter}>
+              <Text style={styles.stepTitle}>Selecciona el Viaje</Text>
+              
+              {/* Nav Date Picker */}
+              {Platform.OS === 'web' ? (
+                <View style={{ position: 'absolute', opacity: 0, width: '100%', height: '100%', overflow: 'hidden' }}>
+                  {createElement('input', {
+                    type: 'date',
+                    value: getLocalDateString(selectedDate),
+                    min: getLocalDateString(new Date()),
+                    onChange: (e: any) => {
+                      const val = e.target.value;
+                      if (val) {
+                        const [y, m, d] = val.split('-').map(Number);
+                        const newDate = new Date(selectedDate);
+                        newDate.setFullYear(y, m - 1, d);
+                        setSelectedDate(newDate);
+                      }
+                    },
+                    onClick: (e: any) => { try { if (e.target.showPicker) e.target.showPicker(); } catch (err) {} },
+                    style: { width: '100%', height: '100%', cursor: 'pointer' }
+                  })}
+                </View>
+              ) : (
+                <Pressable onPress={() => setShowDatePicker(true)} style={{ position: 'absolute', width: '100%', height: '100%', zIndex: 10 }} />
+              )}
+
+              <Text style={styles.subtitle}>
+                {selectedDate.toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long' })}
+                <Text style={{ fontSize: 10, color: PerlaColors.onSurfaceVariant }}>  ▼</Text>
+              </Text>
+            </View>
+
+            <Pressable 
+              style={({pressed}) => [styles.carouselBtn, pressed && { opacity: 0.7 }]}
+              onPress={() => {
+                const d = new Date(selectedDate);
+                d.setDate(d.getDate() + 1);
+                setSelectedDate(d);
+              }}
+            >
+              <Text style={styles.carouselBtnText}>›</Text>
+            </Pressable>
+          </View>
+
+          {Platform.OS !== 'web' && showDatePicker && (
+            <DateTimePicker
+              value={selectedDate}
+              mode="date"
+              display="default"
+              minimumDate={new Date()}
+              onChange={(e, d) => {
+                setShowDatePicker(false);
+                if (d) setSelectedDate(d);
+              }}
+            />
+          )}
+
+          {activeTripsList.length > 0 && (
+            <View style={styles.searchContainer}>
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Buscar barco u hora..."
+                placeholderTextColor={PerlaColors.onSurfaceVariant + "80"}
+                value={searchText}
+                onChangeText={setSearchText}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              {searchText !== '' && (
+                <Pressable onPress={() => setSearchText('')} style={styles.clearSearch}>
+                  <Text style={{ color: PerlaColors.onSurfaceVariant, fontSize: 18 }}>✕</Text>
+                </Pressable>
+              )}
+            </View>
+          )}
+
+          {/* Listado */}
+          {activeTripsList.length === 0 && (
+            <Text style={{ color: PerlaColors.onSurfaceVariant, textAlign: 'center', marginTop: 24, fontFamily: 'Manrope' }}>
+              No hay viajes disponibles o próximos para el día seleccionado.
+            </Text>
+          )}
+
+          {filteredTrips.map(v => {
             const ocu = cupos[v.id_viaje] ?? 0;
             const disp = v.embarcacion.capacidad_maxima - ocu;
             return (
@@ -186,7 +323,7 @@ export default function VendedorPanelScreen() {
                 style={[styles.optionCard, selectedViaje?.id_viaje === v.id_viaje && styles.optionCardActive]}
                 onPress={() => { setSelectedViaje(v); setStep('paquete'); }}
               >
-                <Text style={styles.optionMain}>🕐 {v.hora_salida_programada.slice(0, 5)}</Text>
+                <Text style={styles.optionMain}>🕐 {format12h(v.hora_salida_programada)}</Text>
                 <Text style={styles.optionSub}>{v.embarcacion.nombre}</Text>
                 <Text style={[styles.optionTag, disp <= 0 && { color: '#EF5350' }]}>
                   {disp > 0 ? `${disp} lugares` : 'LLENO'}
@@ -252,7 +389,7 @@ export default function VendedorPanelScreen() {
           <View style={styles.summaryBox}>
             <Text style={styles.summaryLine}>📋 {selectedPaquete?.descripcion}</Text>
             <Text style={styles.summaryLine}>👥 {cantNum} persona{cantNum !== 1 ? 's' : ''}</Text>
-            <Text style={styles.summaryLine}>🕐 {selectedViaje?.hora_salida_programada.slice(0, 5)} — {selectedViaje?.embarcacion.nombre}</Text>
+            <Text style={styles.summaryLine}>🕐 {format12h(selectedViaje?.hora_salida_programada)} — {selectedViaje?.embarcacion.nombre}</Text>
             <View style={styles.summaryDivider} />
             <Text style={styles.summaryTotal}>Total: ${subtotal.toFixed(0)} MXN</Text>
           </View>
@@ -362,6 +499,12 @@ const styles = StyleSheet.create({
   progressLabelActive: { fontFamily: 'Manrope-Bold', color: PerlaColors.tertiary },
 
   /* Steps */
+  /* Carousel Styles */
+  carouselHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 },
+  carouselBtn: { paddingHorizontal: 16, paddingVertical: 12, borderRadius: 12, backgroundColor: PerlaColors.surfaceContainerHigh },
+  carouselBtnText: { fontSize: 24, color: PerlaColors.onSurface, lineHeight: 28 },
+  carouselCenter: { alignItems: 'center', flex: 1 },
+  subtitle: { fontFamily: 'Manrope-Bold', fontSize: 13, color: PerlaColors.primary, marginTop: 4, textTransform: 'capitalize' },
   stepTitle: { fontFamily: 'Newsreader', fontSize: 22, color: PerlaColors.onSurface, marginBottom: 16 },
 
   optionCard: {
@@ -435,4 +578,24 @@ const styles = StyleSheet.create({
     backgroundColor: PerlaColors.primary, borderRadius: 14, paddingVertical: 16, paddingHorizontal: 32,
   },
   newSaleBtnText: { fontFamily: 'Manrope-Bold', fontSize: 16, color: PerlaColors.onPrimary },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: PerlaColors.surfaceContainerLow,
+    borderRadius: 14,
+    marginBottom: 16,
+    paddingHorizontal: 16,
+    borderWidth: 1,
+    borderColor: PerlaColors.outlineVariant + '20',
+  },
+  searchInput: {
+    flex: 1,
+    height: 48,
+    fontFamily: 'Manrope-SemiBold',
+    fontSize: 15,
+    color: PerlaColors.onSurface,
+  },
+  clearSearch: {
+    padding: 8,
+  },
 });

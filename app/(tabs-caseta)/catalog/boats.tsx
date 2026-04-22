@@ -18,6 +18,7 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { obtenerBarcos, upsertBarco, eliminarBarco } from '@/src/services/catalogos.service';
 import type { Embarcacion, EstadoOperativoBarco } from '@/src/lib/database.types';
 import { globalEvents } from '@/src/lib/events';
+import { supabase } from '@/src/lib/supabase';
 
 export default function BoatsCatalogScreen() {
   const insets = useSafeAreaInsets();
@@ -167,8 +168,30 @@ function BoatModal({ visible, barco, onClose, onSaved }: {
   onClose: () => void; 
   onSaved: () => void 
 }) {
-  const [formData, setFormData] = useState<Partial<Embarcacion>>(barco || {});
+  const [formData, setFormData] = useState<Partial<Embarcacion>>(barco || { tripulacion_default: [] });
   const [saving, setSaving] = useState(false);
+  const [encargados, setEncargados] = useState<{ id_usuario: string; nombre: string }[]>([]);
+
+  useEffect(() => {
+    supabase
+      .from('usuario')
+      .select('id_usuario, nombre')
+      .eq('rango', 'Barco')
+      .then(({ data }) => {
+        if (data) setEncargados(data);
+      });
+  }, []);
+
+  const toggleEncargado = (id: string) => {
+    setFormData(prev => {
+      const current = prev.tripulacion_default || [];
+      if (current.includes(id)) {
+        return { ...prev, tripulacion_default: current.filter(x => x !== id) };
+      } else {
+        return { ...prev, tripulacion_default: [...current, id] };
+      }
+    });
+  };
 
   const handleSave = async () => {
     if (!formData.nombre) return Alert.alert('Error', 'El nombre es requerido');
@@ -177,7 +200,8 @@ function BoatModal({ visible, barco, onClose, onSaved }: {
       await upsertBarco(formData);
       onSaved();
     } catch (err: any) {
-      Alert.alert('Error', err.message);
+      console.error("Full save error:", err);
+      Alert.alert('Error Guardando', err.message + '\n\nDetalles: ' + JSON.stringify(err, null, 2));
     } finally {
       setSaving(false);
     }
@@ -238,6 +262,32 @@ function BoatModal({ visible, barco, onClose, onSaved }: {
               onChangeText={(t) => setFormData({ ...formData, duracion_estandar_viaje: parseInt(t) || 0 })}
               keyboardType="numeric"
             />
+
+            <Text style={styles.label}>TRIPULACIÓN PREDETERMINADA</Text>
+            <View style={styles.barcoList}>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+                {encargados.map(enc => {
+                  const isSelected = (formData.tripulacion_default || []).includes(enc.id_usuario);
+                  return (
+                    <Pressable
+                      key={enc.id_usuario}
+                      style={[
+                        styles.barcoBtn,
+                        isSelected && styles.barcoBtnActive,
+                      ]}
+                      onPress={() => toggleEncargado(enc.id_usuario)}
+                    >
+                      <Text style={[
+                        styles.barcoBtnText,
+                        isSelected && styles.barcoBtnTextActive,
+                      ]}>
+                        {enc.nombre}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+            </View>
 
             <Text style={styles.label}>ESTADO OPERATIVO</Text>
             <View style={styles.estadoRow}>
@@ -372,5 +422,29 @@ const styles = StyleSheet.create({
     backgroundColor: PerlaColors.error + '15',
     borderWidth: 1,
     borderColor: PerlaColors.error + '30',
+  },
+  barcoList: {
+    marginTop: 4,
+    marginBottom: 8,
+  },
+  barcoBtn: {
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 10,
+    backgroundColor: PerlaColors.surfaceContainer,
+    borderWidth: 1,
+    borderColor: 'transparent',
+  },
+  barcoBtnActive: {
+    borderColor: PerlaColors.tertiary + '60',
+    backgroundColor: PerlaColors.tertiary + '15',
+  },
+  barcoBtnText: {
+    fontFamily: 'Manrope-Medium',
+    fontSize: 13,
+    color: PerlaColors.onSurfaceVariant,
+  },
+  barcoBtnTextActive: {
+    color: PerlaColors.tertiary,
   },
 });

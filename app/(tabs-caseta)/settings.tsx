@@ -73,6 +73,17 @@ export default function SettingsScreen() {
         />
       </View>
 
+      {/* Operación Section */}
+      <Text style={styles.sectionTitle}>Operación</Text>
+      <View style={styles.menuContainer}>
+        <MenuButton
+          icon="person.3.fill"
+          title="Gestión de Personal"
+          subtitle="Tripulantes, Casetas y Vendedores"
+          onPress={() => router.push("/(tabs-caseta)/users")}
+        />
+      </View>
+
       {/* Sign Out */}
       <Pressable
         style={({ pressed }) => [

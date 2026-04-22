@@ -15,13 +15,13 @@ export async function obtenerViajesDelDia(fecha?: string) {
     .from('viaje')
     .select(`
       *,
-      embarcacion ( nombre, capacidad_maxima, estado_operativo )
+      embarcacion ( nombre, capacidad_maxima, estado_operativo, duracion_estandar_viaje )
     `)
     .eq('fecha_programada', hoy)
     .order('hora_salida_programada', { ascending: true });
 
   if (error) throw error;
-  return data as (Viaje & { embarcacion: { nombre: string; capacidad_maxima: number; estado_operativo: string } })[];
+  return data as (Viaje & { embarcacion: { nombre: string; capacidad_maxima: number; estado_operativo: string; duracion_estandar_viaje: number | null } })[];
 }
 
 /**
@@ -53,7 +53,7 @@ export async function obtenerViajeActual(idEncargado: string) {
       *,
       embarcacion ( nombre, capacidad_maxima )
     `)
-    .eq('id_encargado_abordaje', idEncargado)
+    .contains('tripulacion_asignada', [idEncargado])
     .eq('fecha_programada', hoy)
     .in('estado_viaje', ['Programado', 'Retrasado', 'Abordando', 'En_Navegacion'])
     .order('hora_salida_programada', { ascending: true })

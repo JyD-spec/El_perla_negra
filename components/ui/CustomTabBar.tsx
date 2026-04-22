@@ -461,7 +461,7 @@ export function CustomTabBar({
                 
                 // Role-specific filtering
                 if (roleSegment === "(tabs-comprador)") {
-                  // Comprador only sees Statistics (index) and Settings
+                  // Comprador only sees Home (index) and Settings
                   return route.name === "index" || route.name === "settings";
                 }
 

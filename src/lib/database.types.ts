@@ -54,6 +54,7 @@ export interface Embarcacion {
   estado_operativo: EstadoOperativoBarco | null;
   duracion_estandar_viaje: number | null;
   margen_tolerancia_minutos: number | null;
+  tripulacion_default?: string[];
 }
 
 export interface Viaje {
@@ -63,6 +64,7 @@ export interface Viaje {
   estado_viaje: EstadoViaje | null;
   id_embarcacion: number;
   id_encargado_abordaje: string | null;
+  tripulacion_asignada?: string[];
   retraso_minutos: number | null;
   hora_inicio_abordaje: string | null;
   hora_salida_real: string | null;
@@ -192,6 +194,7 @@ export interface ViajeInsert {
   hora_salida_programada: string;
   id_embarcacion: number;
   id_encargado_abordaje?: string | null;
+  tripulacion_asignada?: string[];
   es_ultima_vuelta?: boolean;
 }
 

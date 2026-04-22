@@ -13,6 +13,7 @@ import { PerlaColors } from '@/constants/theme';
 import { useAuth } from '@/src/contexts/AuthContext';
 import { obtenerViajeActual, actualizarEstadoViaje } from '@/src/services/viajes.service';
 import type { ViajeConDetalles } from '@/src/lib/database.types';
+import { format12h, format12hISO } from '@/src/lib/time';
 
 /* ────────────────────────────────────────────────────────────
    Barco – Viaje Actual
@@ -109,15 +110,15 @@ export default function BarcoViajeScreen() {
       {/* ── Trip Details ─────────────────────────── */}
       <View style={styles.detailsCard}>
         <DetailRow icon="📅" label="Fecha" value={viaje.fecha_programada} />
-        <DetailRow icon="🕐" label="Salida Programada" value={viaje.hora_salida_programada.slice(0, 5)} />
+        <DetailRow icon="🕐" label="Salida Programada" value={format12h(viaje.hora_salida_programada)} />
         {viaje.hora_inicio_abordaje && (
-          <DetailRow icon="🚶" label="Inicio Abordaje" value={viaje.hora_inicio_abordaje.slice(11, 16)} />
+          <DetailRow icon="🚶" label="Inicio Abordaje" value={format12hISO(viaje.hora_inicio_abordaje)} />
         )}
         {viaje.hora_salida_real && (
-          <DetailRow icon="🚀" label="Salida Real" value={viaje.hora_salida_real.slice(11, 16)} />
+          <DetailRow icon="🚀" label="Salida Real" value={format12hISO(viaje.hora_salida_real)} />
         )}
         {viaje.hora_llegada_real && (
-          <DetailRow icon="🏁" label="Llegada" value={viaje.hora_llegada_real.slice(11, 16)} />
+          <DetailRow icon="🏁" label="Llegada" value={format12hISO(viaje.hora_llegada_real)} />
         )}
         {(viaje.retraso_minutos ?? 0) > 0 && (
           <DetailRow icon="⚠️" label="Retraso" value={`${viaje.retraso_minutos} min`} warning />
