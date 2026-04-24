@@ -78,6 +78,7 @@ export async function obtenerReservacionesDelDia(fecha?: string) {
       cliente ( nombre_completo, telefono ),
       paquete ( descripcion, costo_persona ),
       viaje!inner ( fecha_programada, hora_salida_programada, embarcacion ( nombre ) ),
+      pago ( metodo_pago, monto_pagado ),
       detalle_reservacion ( *, paquete ( * ) )
     `)
     .eq('viaje.fecha_programada', hoy)
@@ -151,6 +152,7 @@ export async function crearReservacion(datos: {
   authId?: string;
   paquetes?: { idPaquete: number; cantidad: number }[]; // New breakdown
   estadoPase?: 'Pendiente_Caseta' | 'Aprobado';
+  estadoPago?: 'Pendiente' | 'Pagado';
 }) {
   // 1. Create or find the client
   let idCliente: number;
@@ -236,6 +238,7 @@ export async function crearReservacion(datos: {
       subtotal: subtotal || 0,
       total_pagar: subtotal || 0,
       estado_pase: datos.estadoPase || 'Pendiente_Caseta',
+      estado_pago: datos.estadoPago || 'Pendiente',
     })
     .select()
     .single();

@@ -212,6 +212,7 @@ export interface ReservacionConDetalles extends Reservacion {
   paquete?: Paquete;
   viaje?: Viaje & { embarcacion?: Embarcacion };
   cliente?: Cliente;
+  pago?: Pago[];
   detalles?: (DetalleReservacion & { paquete?: Paquete })[];
 }
 

@@ -1,34 +1,31 @@
-import { useState, useMemo, useCallback, useEffect } from 'react';
-import {
-  StyleSheet,
-  View,
-  Text,
-  ScrollView,
-  TextInput,
-  Pressable,
-  Platform,
-  KeyboardAvoidingView,
-  ActivityIndicator,
-  Modal,
-  FlatList,
-} from 'react-native';
 import { useStripe } from '@/src/components/StripeWrapper';
-import DateTimePicker, {
-  type DateTimePickerEvent,
-} from '@react-native-community/datetimepicker';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  ActivityIndicator,
+  FlatList,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { PerlaColors } from '@/constants/theme';
 import { useToast } from '@/src/contexts/ToastContext';
+import type { Descuento, EstadoViaje, Paquete, Viaje } from '@/src/lib/database.types';
 import { supabase } from '@/src/lib/supabase';
-import { obtenerViajesDelDia, obtenerCupoViaje } from '@/src/services/viajes.service';
+import { format12h } from '@/src/lib/time';
+import { obtenerDescuentos } from '@/src/services/catalogos.service';
 import { registrarPago } from '@/src/services/pagos.service';
 import { crearReservacion } from '@/src/services/reservaciones.service';
-import type { Paquete, Viaje } from '@/src/lib/database.types';
-import { FlowToggle } from '@/components/ui/FlowToggle';
-import { format12h } from '@/src/lib/time';
-import type { EstadoViaje } from '@/src/lib/database.types';
+import { obtenerCupoViaje, obtenerViajesDelDia } from '@/src/services/viajes.service';
 
 /* ────────────────────────────────────────────────────────────
    Types
@@ -52,7 +49,7 @@ const GET_STATUS_STYLE = (status: EstadoViaje) => {
 const DISCOUNT_THRESHOLD = 5;
 const DISCOUNT_RATE = 0.10;
 
-/* ────────────────────────────────────────────────────────────
+/* ───────────────────────────────────y────────────────────────
    Caseta – New Reservation Screen
    ──────────────────────────────────────────────────────────── */
 
@@ -66,6 +63,10 @@ export default function CasetaNewReservationScreen() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [paquetes, setPaquetes] = useState<Paquete[]>([]);
+  const [allDiscounts, setAllDiscounts] = useState<Descuento[]>([]);
+  const [selectedDiscount, setSelectedDiscount] = useState<Descuento | null>(null);
+  const [manualDiscountOverride, setManualDiscountOverride] = useState(false);
+  const [showDiscountPicker, setShowDiscountPicker] = useState(false);
   const [viajes, setViajes] = useState<ViajeConEmb[]>([]);
   const [cupos, setCupos] = useState<Record<number, number>>({});
 
@@ -124,14 +125,19 @@ export default function CasetaNewReservationScreen() {
   useEffect(() => {
     (async () => {
       try {
-        const { data: paqData } = await supabase.from('paquete').select('*');
-        setPaquetes(paqData || []);
+        const [paqData, descData] = await Promise.all([
+          supabase.from('paquete').select('*'),
+          obtenerDescuentos()
+        ]);
+
+        setPaquetes(paqData.data || []);
+        setAllDiscounts(descData || []);
         
-        if (params.paquete && paqData) {
-          const p = paqData.find(x => x.descripcion.toLowerCase().includes(params.paquete!.toLowerCase()));
+        if (params.paquete && paqData.data) {
+          const p = paqData.data.find(x => x.descripcion.toLowerCase().includes(params.paquete!.toLowerCase()));
           if (p) setPackageSelections({ [p.id_paquete]: 1 });
-        } else if (paqData && paqData.length > 0) {
-          setPackageSelections({ [paqData[0].id_paquete]: 1 });
+        } else if (paqData.data && paqData.data.length > 0) {
+          setPackageSelections({ [paqData.data[0].id_paquete]: 1 });
         }
       } catch (err) {
         console.error('Error loading initial data:', err);
@@ -265,9 +271,40 @@ export default function CasetaNewReservationScreen() {
     }, 0);
   }, [packageSelections, paquetes]);
 
-  const hasDiscount = personasNum >= DISCOUNT_THRESHOLD;
-  const discount = hasDiscount ? subtotal * DISCOUNT_RATE : 0;
-  const total = subtotal - discount;
+  // Logic for automatic discount
+  useEffect(() => {
+    if (manualDiscountOverride) return;
+
+    // Find applicable discounts based on conditions
+    const applicable = allDiscounts.filter(d => {
+      if (!d.activo) return false;
+      
+      // Rule: Minimum total tickets
+      if (d.cantidad_minima_boletos && personasNum < d.cantidad_minima_boletos) return false;
+      
+      // Rule: Specific package requirement
+      if (d.id_paquete_condicion) {
+        const qty = packageSelections[Number(d.id_paquete_condicion)] || 0;
+        if (qty < (d.cantidad_minima_boletos || 1)) return false;
+      }
+
+      return true;
+    });
+
+    // Pick the best default discount (highest percentage)
+    const bestDefault = applicable
+      .filter(d => d.es_default)
+      .sort((a, b) => Number(b.porcentaje) - Number(a.porcentaje))[0];
+
+    setSelectedDiscount(bestDefault || null);
+  }, [personasNum, packageSelections, allDiscounts, manualDiscountOverride]);
+
+  const discountAmount = useMemo(() => {
+    if (!selectedDiscount) return 0;
+    return subtotal * (Number(selectedDiscount.porcentaje) / 100);
+  }, [subtotal, selectedDiscount]);
+
+  const total = subtotal - discountAmount;
 
   /* ─── Handlers ─────────────────────────────────────────── */
   const onDateChange = (_: any, selectedDate?: Date) => {
@@ -389,6 +426,7 @@ export default function CasetaNewReservationScreen() {
         idViaje: selectedViaje.id_viaje,
         cantidadPersonas: personasNum,
         estadoPase: (paymentMethod === 'efectivo' || paymentMethod === 'tarjeta') ? 'Aprobado' : 'Pendiente_Caseta',
+        estadoPago: (paymentMethod === 'efectivo' || paymentMethod === 'tarjeta') ? 'Pagado' : 'Pendiente',
       });
 
       // 5. Registrar el pago
@@ -598,10 +636,36 @@ export default function CasetaNewReservationScreen() {
           })}
         </View>
 
-
-        {/* 4. Fecha y Viaje */}
+        {/* ─── 4. Descuento ───────────────────────────── */}
         <View style={styles.sectionHeader}>
           <View style={styles.sectionNumber}><Text style={styles.sectionNumberText}>4</Text></View>
+          <Text style={styles.sectionLabel}>Descuento</Text>
+        </View>
+
+        <View style={styles.fieldCard}>
+          <Text style={styles.fieldLabel}>DESCUENTO APLICADO</Text>
+          <Pressable 
+            style={styles.discountSelector} 
+            onPress={() => setShowDiscountPicker(true)}
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={styles.discountMainText}>
+                {selectedDiscount ? selectedDiscount.nombre : 'Sin Descuento'}
+              </Text>
+              {selectedDiscount && (
+                <Text style={styles.discountSubText}>
+                  {selectedDiscount.porcentaje}% de descuento aplicado
+                </Text>
+              )}
+            </View>
+            <Text style={styles.discountArrow}>▼</Text>
+          </Pressable>
+        </View>
+
+
+        {/* ─── 5. Fecha y Horario ───────────────────────── */}
+        <View style={styles.sectionHeader}>
+          <View style={styles.sectionNumber}><Text style={styles.sectionNumberText}>5</Text></View>
           <Text style={styles.sectionLabel}>Fecha y Horario</Text>
         </View>
 
@@ -710,6 +774,16 @@ export default function CasetaNewReservationScreen() {
 
         <View style={styles.summary}>
           <View style={styles.summaryRow}>
+            <Text style={styles.summarySmallLab}>Subtotal</Text>
+            <Text style={styles.summarySmallVal}>${subtotal.toLocaleString()} MXN</Text>
+          </View>
+          {discountAmount > 0 && (
+            <View style={styles.summaryRow}>
+              <Text style={styles.summarySmallLab}>Descuento ({selectedDiscount?.nombre})</Text>
+              <Text style={[styles.summarySmallVal, { color: '#66BB6A' }]}>-${discountAmount.toLocaleString()} MXN</Text>
+            </View>
+          )}
+          <View style={[styles.summaryRow, { marginTop: 12 }]}>
             <Text style={styles.summaryLab}>Total a Pagar</Text>
             <Text style={styles.summaryVal}>${total.toLocaleString()} MXN</Text>
           </View>
@@ -722,6 +796,69 @@ export default function CasetaNewReservationScreen() {
           </Pressable>
         </View>
       </ScrollView>
+
+      {/* ─── Discount Selection Modal ───────────────── */}
+      <Modal visible={showDiscountPicker} animationType="fade" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Seleccionar Descuento</Text>
+              <Pressable onPress={() => setShowDiscountPicker(false)}>
+                <Text style={styles.modalClose}>✕</Text>
+              </Pressable>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false}>
+              <Pressable 
+                style={[styles.discountItem, !selectedDiscount && styles.discountItemActive]}
+                onPress={() => {
+                  setSelectedDiscount(null);
+                  setManualDiscountOverride(true);
+                  setShowDiscountPicker(false);
+                }}
+              >
+                <Text style={[styles.discountItemName, !selectedDiscount && styles.discountItemActiveText]}>
+                  Sin Descuento
+                </Text>
+                <Text style={styles.discountItemDesc}>No aplicar ninguna promoción</Text>
+              </Pressable>
+
+              {allDiscounts.filter(d => d.activo).map(d => (
+                <Pressable 
+                  key={d.id_descuento}
+                  style={[styles.discountItem, selectedDiscount?.id_descuento === d.id_descuento && styles.discountItemActive]}
+                  onPress={() => {
+                    setSelectedDiscount(d);
+                    setManualDiscountOverride(true);
+                    setShowDiscountPicker(false);
+                  }}
+                >
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Text style={[styles.discountItemName, selectedDiscount?.id_descuento === d.id_descuento && styles.discountItemActiveText]}>
+                      {d.nombre}
+                    </Text>
+                    <Text style={styles.discountItemPct}>{d.porcentaje}%</Text>
+                  </View>
+                  <Text style={styles.discountItemDesc}>
+                    {d.cantidad_minima_boletos ? `Mínimo ${d.cantidad_minima_boletos} boletos. ` : ''}
+                    {d.es_default ? '(Automático si cumple)' : ''}
+                  </Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+            
+            <Pressable 
+              style={styles.modalAutoBtn}
+              onPress={() => {
+                setManualDiscountOverride(false);
+                setShowDiscountPicker(false);
+              }}
+            >
+              <Text style={styles.modalAutoBtnText}>Restaurar Automático</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
 
       {/* ─── Country Picker Modal ───────────────────── */}
       <Modal visible={showCountryPicker} animationType="slide" transparent>
@@ -879,4 +1016,20 @@ const styles = StyleSheet.create({
   lessBtn: { padding: 12, alignItems: 'center', marginTop: 4 },
   lessBtnText: { color: PerlaColors.onSurfaceVariant, fontFamily: 'Manrope', fontSize: 13 },
   emptyText: { textAlign: 'center', color: PerlaColors.onSurfaceVariant, marginTop: 20, fontFamily: 'Manrope' },
+
+  /* Discount Styles */
+  discountSelector: { flexDirection: 'row', alignItems: 'center', backgroundColor: PerlaColors.surfaceContainer, borderRadius: 12, padding: 16, marginTop: 4 },
+  discountMainText: { fontFamily: 'Manrope-Bold', color: PerlaColors.onSurface, fontSize: 15 },
+  discountSubText: { fontFamily: 'Manrope', color: '#66BB6A', fontSize: 12, marginTop: 2 },
+  discountArrow: { color: PerlaColors.onSurfaceVariant, fontSize: 12 },
+  discountItem: { padding: 16, borderRadius: 12, backgroundColor: PerlaColors.surfaceContainerLow, marginBottom: 12, borderWidth: 1, borderColor: 'transparent' },
+  discountItemActive: { borderColor: PerlaColors.tertiary, backgroundColor: PerlaColors.tertiary + '08' },
+  discountItemName: { fontFamily: 'Manrope-Bold', fontSize: 16, color: PerlaColors.onSurface },
+  discountItemActiveText: { color: PerlaColors.tertiary },
+  discountItemPct: { fontFamily: 'Newsreader-Bold', fontSize: 20, color: '#66BB6A' },
+  discountItemDesc: { fontFamily: 'Manrope', fontSize: 12, color: PerlaColors.onSurfaceVariant, marginTop: 4 },
+  modalAutoBtn: { backgroundColor: PerlaColors.surfaceContainerHighest, padding: 16, borderRadius: 12, alignItems: 'center', marginTop: 12 },
+  modalAutoBtnText: { fontFamily: 'Manrope-Bold', color: PerlaColors.onSurface, fontSize: 14 },
+  summarySmallLab: { fontFamily: 'Manrope', fontSize: 12, color: PerlaColors.onSurfaceVariant },
+  summarySmallVal: { fontFamily: 'Manrope-Bold', fontSize: 14, color: PerlaColors.onSurface },
 });

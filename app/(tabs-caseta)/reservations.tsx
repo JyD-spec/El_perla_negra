@@ -10,6 +10,7 @@ import {
   TextInput,
   Alert,
   Platform,
+  Modal,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -58,6 +59,12 @@ export default function CasetaReservationsScreen() {
   const [filtro, setFiltro] = useState<Filtro>('Todos');
   const [busqueda, setBusqueda] = useState('');
   const [actionLoading, setActionLoading] = useState<number | null>(null);
+  const [confirmModal, setConfirmModal] = useState<{
+    visible: boolean;
+    title: string;
+    message: string;
+    onConfirm: () => void;
+  }>({ visible: false, title: '', message: '', onConfirm: () => {} });
 
   const fetchData = useCallback(async () => {
     try {
@@ -131,43 +138,25 @@ export default function CasetaReservationsScreen() {
     }
   };
 
-  const handleRechazar = async (id: number) => {
-    const confirmRechazo = () => {
-      Alert.alert('Rechazar Pase', '¿Estás seguro?', [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Rechazar',
-          style: 'destructive',
-          onPress: async () => {
-            setActionLoading(id);
-            try {
-              await rechazarPase(id);
-              await fetchData();
-            } catch (err: any) {
-              Alert.alert('Error', err.message);
-            } finally {
-              setActionLoading(null);
-            }
-          },
-        },
-      ]);
-    };
-
-    if (Platform.OS === 'web') {
-      if (window.confirm('¿Estás seguro de que deseas rechazar este pase?')) {
+  const handleRechazar = (id: number) => {
+    setConfirmModal({
+      visible: true,
+      title: 'Rechazar Pase',
+      message: '¿Estás seguro de que deseas rechazar este pase?',
+      onConfirm: async () => {
         setActionLoading(id);
         try {
           await rechazarPase(id);
           await fetchData();
         } catch (err: any) {
-          alert('Error: ' + err.message);
+          if (Platform.OS === 'web') alert(err.message);
+          else Alert.alert('Error', err.message);
         } finally {
           setActionLoading(null);
+          setConfirmModal(prev => ({ ...prev, visible: false }));
         }
       }
-    } else {
-      confirmRechazo();
-    }
+    });
   };
 
   if (loading) {
@@ -248,12 +237,17 @@ export default function CasetaReservationsScreen() {
                   {r.cliente?.nombre_completo ?? 'Cliente'}
                 </Text>
                 <Text style={styles.resDetail}>
-                  📱 {r.cliente?.telefono ?? '—'} · {r.cantidad_personas} persona{r.cantidad_personas !== 1 ? 's' : ''}
+                  📱 {r.cliente?.telefono ?? '—'} · {r.cantidad_personas} pers.
+                  {r.pago && r.pago.length > 0 && (
+                    <Text style={{ color: r.estado_pago === 'Pendiente' ? '#FFA726' : PerlaColors.onSurfaceVariant }}>
+                      {' '}· 💳 {r.pago[0].metodo_pago}{r.estado_pago === 'Pendiente' ? ' (Pend.)' : ''}
+                    </Text>
+                  )}
                 </Text>
               </View>
               <View style={[styles.resBadge, { backgroundColor: estado.bg }]}>
                 <Text style={[styles.resBadgeText, { color: estado.text }]}>
-                  {(r.estado_pase ?? 'Pendiente').replace('_', ' ')}
+                  {(r.estado_pase === 'Pendiente_Caseta' ? 'Pendiente' : (r.estado_pase ?? 'Pendiente')).replace('_', ' ')}
                 </Text>
               </View>
             </View>
@@ -311,6 +305,29 @@ export default function CasetaReservationsScreen() {
           </View>
         );
       })}
+      {/* ── Confirm Modal ─────────────────────────── */}
+      <Modal visible={confirmModal.visible} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>{confirmModal.title}</Text>
+            <Text style={styles.modalMessage}>{confirmModal.message}</Text>
+            <View style={styles.modalActions}>
+              <Pressable 
+                style={styles.modalCancelBtn} 
+                onPress={() => setConfirmModal(prev => ({ ...prev, visible: false }))}
+              >
+                <Text style={styles.modalCancelText}>Cancelar</Text>
+              </Pressable>
+              <Pressable 
+                style={styles.modalConfirmBtn} 
+                onPress={confirmModal.onConfirm}
+              >
+                <Text style={styles.modalConfirmText}>Confirmar</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 }
@@ -466,11 +483,19 @@ const styles = StyleSheet.create({
   approveBtn: {
     backgroundColor: '#66BB6A',
   },
-  approveText: {
-    fontFamily: 'Manrope-Bold',
-    fontSize: 13,
-    color: '#fff',
-  },
+  approveText: { fontFamily: 'Manrope-Bold', color: '#fff', fontSize: 14 },
+
+  /* Modal */
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'center', alignItems: 'center', padding: 20 },
+  modalContent: { backgroundColor: PerlaColors.surfaceContainerLow, borderRadius: 24, padding: 28, width: '100%', maxWidth: 400, borderWidth: 1, borderColor: PerlaColors.outlineVariant + '40' },
+  modalTitle: { fontFamily: 'Newsreader-Bold', fontSize: 26, color: PerlaColors.onSurface, marginBottom: 12 },
+  modalMessage: { fontFamily: 'Manrope', fontSize: 15, color: PerlaColors.onSurfaceVariant, marginBottom: 28, lineHeight: 22 },
+  modalActions: { flexDirection: 'row', gap: 12, justifyContent: 'flex-end' },
+  modalCancelBtn: { paddingVertical: 12, paddingHorizontal: 20, borderRadius: 14, backgroundColor: PerlaColors.surfaceContainerHighest },
+  modalCancelText: { fontFamily: 'Manrope-Bold', color: PerlaColors.onSurfaceVariant, fontSize: 14 },
+  modalConfirmBtn: { paddingVertical: 12, paddingHorizontal: 24, borderRadius: 14, backgroundColor: '#EF5350' },
+  modalConfirmText: { fontFamily: 'Manrope-Bold', color: '#fff', fontSize: 14 },
+
   reubicarBtn: {
     backgroundColor: '#42A5F5' + '15',
     borderWidth: 1,

@@ -567,11 +567,7 @@ export default function CasetaTripsScreen() {
                 </Text>
               )}
 
-              {v.clima_estado && (
-                <Text style={styles.climaText}>
-                  🌊 {v.clima_estado} · Viento: {v.clima_viento_kmh ?? "—"} km/h
-                </Text>
-              )}
+
             </Pressable>
           );
         })}
