@@ -36,7 +36,8 @@ export async function obtenerMisReservaciones() {
       *,
       paquete ( descripcion, costo_persona ),
       viaje ( fecha_programada, hora_salida_programada, estado_viaje,
-              embarcacion ( nombre ) )
+              embarcacion ( nombre ) ),
+      detalle_reservacion ( *, paquete ( * ) )
     `)
     .eq('id_cliente', clienteData.id_cliente)
     .order('created_at', { ascending: false });
@@ -54,7 +55,8 @@ export async function obtenerReservacionesPorViaje(idViaje: number) {
     .select(`
       *,
       cliente ( nombre_completo, telefono ),
-      paquete ( descripcion, costo_persona )
+      paquete ( descripcion, costo_persona ),
+      detalle_reservacion ( *, paquete ( * ) )
     `)
     .eq('id_viaje', idViaje)
     .order('created_at', { ascending: true });
@@ -75,7 +77,8 @@ export async function obtenerReservacionesDelDia(fecha?: string) {
       *,
       cliente ( nombre_completo, telefono ),
       paquete ( descripcion, costo_persona ),
-      viaje!inner ( fecha_programada, hora_salida_programada, embarcacion ( nombre ) )
+      viaje!inner ( fecha_programada, hora_salida_programada, embarcacion ( nombre ) ),
+      detalle_reservacion ( *, paquete ( * ) )
     `)
     .eq('viaje.fecha_programada', hoy)
     .order('created_at', { ascending: false });
@@ -94,7 +97,8 @@ export async function verificarPIN(pin: string) {
       *,
       cliente ( nombre_completo, telefono ),
       paquete ( descripcion ),
-      viaje ( fecha_programada, hora_salida_programada )
+      viaje ( fecha_programada, hora_salida_programada ),
+      detalle_reservacion ( *, paquete ( * ) )
     `)
     .eq('pin_verificacion', pin.toUpperCase())
     .single();
@@ -118,7 +122,8 @@ export async function obtenerMisVentas(fecha?: string) {
       *,
       cliente ( nombre_completo, telefono ),
       paquete ( descripcion, costo_persona ),
-      viaje!inner ( fecha_programada, hora_salida_programada )
+      viaje!inner ( fecha_programada, hora_salida_programada ),
+      detalle_reservacion ( *, paquete ( * ) )
     `)
     .eq('id_vendedor', user.id)
     .eq('viaje.fecha_programada', hoy)
@@ -137,12 +142,15 @@ export async function obtenerMisVentas(fecha?: string) {
 export async function crearReservacion(datos: {
   nombreCliente: string;
   telefono: string;
+  lada?: string;
   email?: string;
-  idPaquete: number;
+  idPaquete?: number; // Legacy or primary
   idViaje: number;
   cantidadPersonas: number;
   idVendedor?: string;
   authId?: string;
+  paquetes?: { idPaquete: number; cantidad: number }[]; // New breakdown
+  estadoPase?: 'Pendiente_Caseta' | 'Aprobado';
 }) {
   // 1. Create or find the client
   let idCliente: number;
@@ -164,6 +172,7 @@ export async function crearReservacion(datos: {
           auth_id: datos.authId,
           nombre_completo: datos.nombreCliente,
           telefono: datos.telefono,
+          lada: datos.lada || null,
           email: datos.email || null,
           es_registrado: true,
         })
@@ -173,19 +182,31 @@ export async function crearReservacion(datos: {
       idCliente = nuevo.id_cliente;
     }
   } else {
-    // Walk-in client (vendedor flow)
-    const { data: nuevo, error: cliErr } = await supabase
+    // Walk-in client (vendedor/caseta flow)
+    // Check if client already exists by phone to avoid duplicates
+    const { data: existing } = await supabase
       .from('cliente')
-      .insert({
-        nombre_completo: datos.nombreCliente,
-        telefono: datos.telefono,
-        email: datos.email || null,
-        es_registrado: false,
-      })
       .select('id_cliente')
-      .single();
-    if (cliErr || !nuevo) throw cliErr ?? new Error('Error creando cliente');
-    idCliente = nuevo.id_cliente;
+      .eq('telefono', datos.telefono)
+      .maybeSingle();
+
+    if (existing) {
+      idCliente = existing.id_cliente;
+    } else {
+      const { data: nuevo, error: cliErr } = await supabase
+        .from('cliente')
+        .insert({
+          nombre_completo: datos.nombreCliente,
+          telefono: datos.telefono,
+          lada: datos.lada || null,
+          email: datos.email || null,
+          es_registrado: false,
+        })
+        .select('id_cliente')
+        .single();
+      if (cliErr || !nuevo) throw cliErr ?? new Error('Error creando cliente');
+      idCliente = nuevo.id_cliente;
+    }
   }
 
   // 2. Get package cost for the trigger (subtotal/total are calculated by trigger,
@@ -199,22 +220,53 @@ export async function crearReservacion(datos: {
   const subtotal = (paquete?.costo_persona ?? 0) * datos.cantidadPersonas;
 
   // 3. Insert reservation — triggers do the heavy lifting
-  const { data, error } = await supabase
+  // Note: We use the first package as "primary" if available, or NULL for mixed
+  const primaryPaquete = datos.paquetes && datos.paquetes.length > 0 
+    ? datos.paquetes[0].idPaquete 
+    : datos.idPaquete;
+
+  const { data: resData, error: resErr } = await supabase
     .from('reservacion')
     .insert({
       id_cliente: idCliente,
-      id_paquete: datos.idPaquete,
+      id_paquete: primaryPaquete || null,
       id_viaje: datos.idViaje,
       cantidad_personas: datos.cantidadPersonas,
-      id_vendedor: datos.idVendedor ?? null,
-      subtotal,
-      total_pagar: subtotal, // trigger recalculates this
+      id_vendedor: datos.idVendedor || null,
+      subtotal: subtotal || 0,
+      total_pagar: subtotal || 0,
+      estado_pase: datos.estadoPase || 'Pendiente_Caseta',
     })
     .select()
     .single();
 
-  if (error) throw error;
-  return data as Reservacion;
+  if (resErr) throw resErr;
+
+  // 4. Insert breakdown into detalle_reservacion
+  if (datos.paquetes && datos.paquetes.length > 0) {
+    const { error: detErr } = await supabase
+      .from('detalle_reservacion')
+      .insert(
+        datos.paquetes.map(p => ({
+          id_reservacion: resData.id_reservacion,
+          id_paquete: p.idPaquete,
+          cantidad: p.cantidad,
+        }))
+      );
+    if (detErr) throw detErr;
+  } else if (datos.idPaquete) {
+    // Legacy fallback if only one package provided
+    const { error: detErr } = await supabase
+      .from('detalle_reservacion')
+      .insert({
+        id_reservacion: resData.id_reservacion,
+        id_paquete: datos.idPaquete,
+        cantidad: datos.cantidadPersonas,
+      });
+    if (detErr) throw detErr;
+  }
+
+  return resData as Reservacion;
 }
 
 /**

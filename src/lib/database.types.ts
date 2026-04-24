@@ -37,6 +37,7 @@ export interface Cliente {
   es_registrado: boolean | null;
   push_token: string | null;
   created_at: string | null;
+  lada: string | null;
 }
 
 export interface Paquete {
@@ -97,6 +98,13 @@ export interface Reservacion {
   es_reubicacion: boolean | null;
   reservacion_original_id: number | null;
   created_at: string | null;
+}
+
+export interface DetalleReservacion {
+  id_detalle: number;
+  id_reservacion: number;
+  id_paquete: number;
+  cantidad: number;
 }
 
 export interface Pago {
@@ -204,6 +212,7 @@ export interface ReservacionConDetalles extends Reservacion {
   paquete?: Paquete;
   viaje?: Viaje & { embarcacion?: Embarcacion };
   cliente?: Cliente;
+  detalles?: (DetalleReservacion & { paquete?: Paquete })[];
 }
 
 export interface ViajeConDetalles extends Viaje {

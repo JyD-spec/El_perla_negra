@@ -12,7 +12,7 @@ import {
   View,
 } from "react-native";
 import "react-native-reanimated";
-import { StripeProvider } from "@stripe/stripe-react-native";
+import { StripeProvider } from "@/src/components/StripeWrapper";
 
 // 1. IMPORTA REACT QUERY AQUÍ
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";

@@ -9,6 +9,7 @@ import {
   RefreshControl,
   TextInput,
   Alert,
+  Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -21,6 +22,7 @@ import {
   verificarPIN,
 } from '@/src/services/reservaciones.service';
 import type { ReservacionConDetalles, EstadoPase } from '@/src/lib/database.types';
+import { supabase } from '@/src/lib/supabase';
 import { format12h } from '@/src/lib/time';
 
 /* ────────────────────────────────────────────────────────────
@@ -72,12 +74,30 @@ export default function CasetaReservationsScreen() {
   useEffect(() => { 
     fetchData(); 
     
+    // Subscribe to real-time updates for reservations
+    const channel = supabase
+      .channel('reservacion-all')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'reservacion' },
+        (payload) => {
+          console.log('Realtime update received:', payload.eventType);
+          fetchData();
+        }
+      )
+      .subscribe((status) => {
+        console.log('Realtime subscription status:', status);
+      });
+
     // FAB event listener
     const unsubscribe = globalEvents.on('fab-press-reservations', () => {
       router.push('/(tabs-caseta)/new-reservation');
     });
 
-    return () => unsubscribe();
+    return () => {
+      unsubscribe();
+      supabase.removeChannel(channel);
+    };
   }, [fetchData]);
 
   const onRefresh = useCallback(() => {
@@ -112,24 +132,42 @@ export default function CasetaReservationsScreen() {
   };
 
   const handleRechazar = async (id: number) => {
-    Alert.alert('Rechazar Pase', '¿Estás seguro?', [
-      { text: 'Cancelar', style: 'cancel' },
-      {
-        text: 'Rechazar',
-        style: 'destructive',
-        onPress: async () => {
-          setActionLoading(id);
-          try {
-            await rechazarPase(id);
-            await fetchData();
-          } catch (err: any) {
-            Alert.alert('Error', err.message);
-          } finally {
-            setActionLoading(null);
-          }
+    const confirmRechazo = () => {
+      Alert.alert('Rechazar Pase', '¿Estás seguro?', [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Rechazar',
+          style: 'destructive',
+          onPress: async () => {
+            setActionLoading(id);
+            try {
+              await rechazarPase(id);
+              await fetchData();
+            } catch (err: any) {
+              Alert.alert('Error', err.message);
+            } finally {
+              setActionLoading(null);
+            }
+          },
         },
-      },
-    ]);
+      ]);
+    };
+
+    if (Platform.OS === 'web') {
+      if (window.confirm('¿Estás seguro de que deseas rechazar este pase?')) {
+        setActionLoading(id);
+        try {
+          await rechazarPase(id);
+          await fetchData();
+        } catch (err: any) {
+          alert('Error: ' + err.message);
+        } finally {
+          setActionLoading(null);
+        }
+      }
+    } else {
+      confirmRechazo();
+    }
   };
 
   if (loading) {

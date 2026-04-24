@@ -19,6 +19,7 @@ import {
   verificarPIN,
   marcarAbordado,
 } from '@/src/services/reservaciones.service';
+import { supabase } from '@/src/lib/supabase';
 import type { ReservacionConDetalles } from '@/src/lib/database.types';
 
 /* ────────────────────────────────────────────────────────────
@@ -51,7 +52,23 @@ export default function BarcoManifestScreen() {
     finally { setLoading(false); setRefreshing(false); }
   }, [user]);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => { 
+    fetchData(); 
+
+    // Subscribe to real-time updates for reservations of this trip
+    const channel = supabase
+      .channel('manifest-updates')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'reservacion' },
+        () => fetchData()
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [fetchData]);
 
   /* ── PIN Verification ──────────────────────────── */
   const handleVerifyPIN = async () => {
@@ -74,7 +91,10 @@ export default function BarcoManifestScreen() {
       // Confirm boarding
       Alert.alert(
         'Confirmar Abordaje',
-        `${res.cliente?.nombre_completo}\n${res.cantidad_personas} persona(s)\n${res.paquete?.descripcion ?? ''}`,
+        `${res.cliente?.nombre_completo}\n${res.cantidad_personas} persona(s)\n` +
+        (res.detalles && res.detalles.length > 0 
+          ? res.detalles.map(d => `• ${d.cantidad}x ${d.paquete?.descripcion}`).join('\n')
+          : `• ${res.paquete?.descripcion ?? '—'}`),
         [
           { text: 'Cancelar', style: 'cancel' },
           {
@@ -234,8 +254,14 @@ function PassengerCard({ reservacion: r, onBoard, loading }: {
           {isBoarded ? '✅ ' : ''}{r.cliente?.nombre_completo ?? 'Cliente'}
         </Text>
         <Text style={styles.passengerDetail}>
-          👥 {r.cantidad_personas} · {r.paquete?.descripcion ?? '—'} · PIN: {r.pin_verificacion ?? '—'}
+          👥 {r.cantidad_personas} · PIN: {r.pin_verificacion ?? '—'}
         </Text>
+        <Text style={[styles.passengerDetail, { color: PerlaColors.tertiary }]}>
+          {r.detalles && r.detalles.length > 0 
+            ? r.detalles.map(d => `${d.cantidad}x ${d.paquete?.descripcion}`).join(', ')
+            : r.paquete?.descripcion ?? '—'}
+        </Text>
+
       </View>
       {isApproved && (
         <Pressable
