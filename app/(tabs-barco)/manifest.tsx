@@ -9,6 +9,7 @@ import {
   RefreshControl,
   TextInput,
   Alert,
+  Modal,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PerlaColors } from '@/constants/theme';
@@ -136,8 +137,21 @@ export default function BarcoManifestScreen() {
           style={StyleSheet.absoluteFill}
           barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
           onBarcodeScanned={({ data }) => {
+            // Find the reservation matching this PIN in our current list
+            const found = reservaciones.find(r => r.pin_verificacion === data);
+            
             setSearchQuery(data);
             setIsScanning(false);
+
+            if (found) {
+              if (found.estado_pase === 'Aprobado') {
+                handleBoardFromList(found);
+              } else if (found.estado_pase === 'Abordado') {
+                Alert.alert('Ya Abordado', `${found.cliente?.nombre_completo} ya se encuentra a bordo.`);
+              }
+            } else {
+              Alert.alert('Boleto Inválido', 'No se encontró ninguna reservación con este código para este viaje.');
+            }
           }}
         />
         
@@ -253,37 +267,101 @@ function PassengerCard({ reservacion: r, onBoard, loading }: {
 }) {
   const isApproved = r.estado_pase === 'Aprobado';
   const isBoarded = r.estado_pase === 'Abordado';
+  const [showDetails, setShowDetails] = useState(false);
 
   return (
-    <View style={[styles.passengerCard, isBoarded && styles.passengerCardBoarded]}>
-      <View style={styles.passengerInfo}>
-        <Text style={styles.passengerName}>
-          {isBoarded ? '✅ ' : ''}{r.cliente?.nombre_completo ?? 'Cliente'}
-        </Text>
-        <Text style={styles.passengerDetail}>
-          👥 {r.cantidad_personas} Pasajero{r.cantidad_personas !== 1 ? 's' : ''}
-        </Text>
-        <Text style={[styles.passengerDetail, { color: PerlaColors.tertiary, marginTop: 4 }]}>
-          {r.detalles && r.detalles.length > 0 
-            ? r.detalles.map(d => `${d.cantidad}x ${d.paquete?.descripcion}`).join('\n')
-            : r.paquete?.descripcion ?? '—'}
-        </Text>
+    <>
+      <Pressable 
+        style={[styles.passengerCard, isBoarded && styles.passengerCardBoarded]}
+        onPress={() => setShowDetails(true)}
+      >
+        <View style={styles.passengerInfo}>
+          <Text style={styles.passengerName}>
+            {isBoarded ? '✅ ' : ''}{r.cliente?.nombre_completo ?? 'Cliente'}
+          </Text>
+          
+          <View style={styles.passengerMetaRow}>
+            <Text style={styles.passengerDetail}>👥 {r.cantidad_personas} Pax</Text>
+            <Text style={styles.passengerDetail}>📞 {r.cliente?.telefono ?? 'No registrado'}</Text>
+          </View>
+          
+          <Text style={styles.passengerPin}>🔑 NIP: {r.pin_verificacion ?? '—'}</Text>
 
-      </View>
-      {isApproved && (
-        <Pressable
-          style={[styles.boardBtn, loading && { opacity: 0.6 }]}
-          onPress={() => onBoard(r)}
-          disabled={loading}
-        >
-          {loading ? (
-            <ActivityIndicator size="small" color="#fff" />
-          ) : (
-            <Text style={styles.boardBtnText}>Abordar</Text>
-          )}
-        </Pressable>
-      )}
-    </View>
+          <Text style={[styles.passengerDetail, { color: PerlaColors.tertiary, marginTop: 4 }]} numberOfLines={1}>
+            {r.detalle_reservacion && r.detalle_reservacion.length > 0 
+              ? r.detalle_reservacion.map(d => `${d.cantidad}x ${d.paquete?.descripcion}`).join(', ')
+              : r.paquete?.descripcion ?? '—'}
+          </Text>
+        </View>
+
+        {isApproved && (
+          <Pressable
+            style={[styles.boardBtn, loading && { opacity: 0.6 }]}
+            onPress={() => onBoard(r)}
+            disabled={loading}
+          >
+            {loading ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <Text style={styles.boardBtnText}>Abordar</Text>
+            )}
+          </Pressable>
+        )}
+      </Pressable>
+
+      <Modal visible={showDetails} transparent animationType="slide" onRequestClose={() => setShowDetails(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Detalles del Pase</Text>
+              <Pressable onPress={() => setShowDetails(false)} style={styles.modalCloseBtn}>
+                <Text style={{ fontSize: 24, color: PerlaColors.onSurfaceVariant }}>✕</Text>
+              </Pressable>
+            </View>
+
+            <ScrollView style={styles.modalBody}>
+              <View style={styles.detailSection}>
+                <Text style={styles.detailLabel}>PASAJERO</Text>
+                <Text style={styles.detailText}>{r.cliente?.nombre_completo ?? 'Cliente Particular'}</Text>
+                <Text style={styles.detailSubtext}>📱 {r.cliente?.telefono ?? 'Sin teléfono registrado'}</Text>
+                <Text style={styles.detailSubtext}>🎫 NIP: {r.pin_verificacion ?? 'Sin NIP'}</Text>
+              </View>
+
+              <View style={styles.detailSection}>
+                <Text style={styles.detailLabel}>BOLETO Y PAQUETES</Text>
+                <View style={styles.packageBox}>
+                  <Text style={styles.packageTitle}>Total Personas: {r.cantidad_personas}</Text>
+                  {r.detalle_reservacion && r.detalle_reservacion.length > 0 ? (
+                    r.detalle_reservacion.map(d => (
+                      <View key={d.id_detalle} style={styles.packageItem}>
+                        <Text style={styles.packageItemText}>{d.cantidad}x {d.paquete?.descripcion}</Text>
+                        <Text style={styles.packageItemSub}>{d.paquete?.costo_persona ? `$${d.paquete.costo_persona} c/u` : ''}</Text>
+                      </View>
+                    ))
+                  ) : (
+                    <Text style={styles.packageItemText}>{r.paquete?.descripcion || 'Pase general'}</Text>
+                  )}
+                </View>
+              </View>
+
+              <View style={styles.detailSection}>
+                <Text style={styles.detailLabel}>ESTADO DEL PAGO</Text>
+                <Text style={[styles.statusBadge, { color: (r.pago && r.pago.length > 0) ? '#66BB6A' : '#EF5350' }]}>
+                  {(r.pago && r.pago.length > 0) ? `Pagado (${r.pago[0].metodo_pago})` : 'Pago pendiente'}
+                </Text>
+              </View>
+            </ScrollView>
+
+            <Pressable 
+              style={[styles.closeModalFullBtn, { backgroundColor: isBoarded ? '#66BB6A' : PerlaColors.tertiary }]}
+              onPress={() => setShowDetails(false)}
+            >
+              <Text style={styles.closeModalFullBtnText}>{isBoarded ? 'Cerrar' : 'Entendido'}</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+    </>
   );
 }
 
@@ -388,6 +466,8 @@ const styles = StyleSheet.create({
   },
   passengerInfo: { flex: 1 },
   passengerName: { fontFamily: 'Manrope-Bold', fontSize: 15, color: PerlaColors.onSurface, marginBottom: 4 },
+  passengerMetaRow: { flexDirection: 'row', gap: 12, marginBottom: 4 },
+  passengerPin: { fontFamily: 'Manrope-Bold', fontSize: 13, color: PerlaColors.tertiary, marginBottom: 2 },
   passengerDetail: { fontFamily: 'Manrope', fontSize: 12, color: PerlaColors.onSurfaceVariant },
 
   boardBtn: {
@@ -399,4 +479,36 @@ const styles = StyleSheet.create({
   emptyState: { alignItems: 'center', paddingTop: 60 },
   emptyIcon: { fontSize: 48, marginBottom: 12 },
   emptyTitle: { fontFamily: 'Newsreader', fontSize: 20, color: PerlaColors.onSurface },
+
+  // Modal Styles
+  modalOverlay: {
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: PerlaColors.background, borderTopLeftRadius: 32, borderTopRightRadius: 32,
+    padding: 24, height: '70%',
+  },
+  modalHeader: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24,
+  },
+  modalTitle: { fontFamily: 'Newsreader-Bold', fontSize: 24, color: PerlaColors.onSurface },
+  modalCloseBtn: { padding: 4 },
+  modalBody: { flex: 1 },
+  detailSection: { marginBottom: 24 },
+  detailLabel: { fontFamily: 'Manrope-Bold', fontSize: 12, color: PerlaColors.tertiary, letterSpacing: 1, marginBottom: 8 },
+  detailText: { fontFamily: 'Newsreader-Bold', fontSize: 20, color: PerlaColors.onSurface, marginBottom: 4 },
+  detailSubtext: { fontFamily: 'Manrope-Medium', fontSize: 14, color: PerlaColors.onSurfaceVariant, marginBottom: 2 },
+  packageBox: {
+    backgroundColor: PerlaColors.surfaceContainerLow, borderRadius: 16, padding: 16,
+    borderWidth: 1, borderColor: PerlaColors.outlineVariant + '30',
+  },
+  packageTitle: { fontFamily: 'Manrope-Bold', fontSize: 15, color: PerlaColors.onSurface, marginBottom: 12 },
+  packageItem: { marginBottom: 8, borderLeftWidth: 2, borderLeftColor: PerlaColors.tertiary, paddingLeft: 12 },
+  packageItemText: { fontFamily: 'Manrope-Bold', fontSize: 14, color: PerlaColors.onSurface },
+  packageItemSub: { fontFamily: 'Manrope', fontSize: 12, color: PerlaColors.onSurfaceVariant },
+  statusBadge: { fontFamily: 'Manrope-Bold', fontSize: 16 },
+  closeModalFullBtn: {
+    borderRadius: 16, paddingVertical: 16, alignItems: 'center', marginTop: 16,
+  },
+  closeModalFullBtnText: { fontFamily: 'Manrope-Bold', fontSize: 16, color: '#fff' },
 });

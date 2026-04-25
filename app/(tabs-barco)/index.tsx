@@ -13,7 +13,12 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PerlaColors } from '@/constants/theme';
 import { useAuth } from '@/src/contexts/AuthContext';
-import { obtenerViajeActual, actualizarEstadoViaje, actualizarRegresoEstimado } from '@/src/services/viajes.service';
+import { 
+  obtenerViajeActual, 
+  actualizarEstadoViaje, 
+  actualizarRegresoEstimado,
+  enviarAlertaPasajeros 
+} from '@/src/services/viajes.service';
 import { obtenerReservacionesPorViaje } from '@/src/services/reservaciones.service';
 import type { ViajeConDetalles } from '@/src/lib/database.types';
 
@@ -42,6 +47,7 @@ export default function BarcoViajeScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
+  const [alertLoading, setAlertLoading] = useState(false);
 
   // ── Info de Pasajeros ──
   const [totalPasajeros, setTotalPasajeros] = useState<number>(0);
@@ -73,12 +79,33 @@ export default function BarcoViajeScreen() {
     setActionLoading(true);
     try {
       await actualizarEstadoViaje(viaje.id_viaje, campo);
+      
+      // Si estamos iniciando abordaje, mandar aviso automático
+      if (campo === 'hora_inicio_abordaje') {
+        try {
+          await enviarAlertaPasajeros(viaje.id_viaje, '¡El abordaje ha comenzado! Por favor dirígete a la embarcación.');
+        } catch (e) { console.error('Error enviando alerta:', e); }
+      }
+
       await fetchData();
     } catch (err: any) {
       console.error(err);
       Alert.alert('Error', err.message || 'Error al actualizar el viaje');
     } finally {
       setActionLoading(false);
+    }
+  };
+
+  const handleAvisoSalida = async () => {
+    if (!viaje) return;
+    setAlertLoading(true);
+    try {
+      await enviarAlertaPasajeros(viaje.id_viaje, '⚠️ El barco zarpará en 5 minutos. Por favor aborda de inmediato.');
+      Alert.alert('Aviso Enviado', 'Se ha notificado a todos los pasajeros.');
+    } catch (err: any) {
+      Alert.alert('Error', 'No se pudo enviar el aviso: ' + err.message);
+    } finally {
+      setAlertLoading(false);
     }
   };
 
@@ -93,6 +120,12 @@ export default function BarcoViajeScreen() {
     setActionLoading(true);
     try {
       await actualizarRegresoEstimado(viaje.id_viaje, horas);
+      
+      // Mandar aviso de zarpe
+      try {
+        await enviarAlertaPasajeros(viaje.id_viaje, `⛵ ¡El barco ha zarpado! Regresaremos en aproximadamente ${horas} horas.`);
+      } catch (e) { console.error('Error enviando alerta:', e); }
+
       await fetchData();
     } catch (err: any) {
       console.error(err);
@@ -171,7 +204,7 @@ export default function BarcoViajeScreen() {
 
 
       {/* ── Action Buttons ──────────────────────── */}
-      {viaje.estado_viaje === 'Programado' && (
+      {(viaje.estado_viaje === 'Programado' || viaje.estado_viaje === 'Retrasado') && (
         <Pressable
           style={[styles.actionBtn, { backgroundColor: '#AB47BC' }, actionLoading && { opacity: 0.6 }]}
           onPress={() => handleAction('hora_inicio_abordaje')}
@@ -192,6 +225,16 @@ export default function BarcoViajeScreen() {
             <Text style={styles.resPersonas}>Total de Pasajeros Registrados:</Text>
             <Text style={styles.resCliente}>{totalPasajeros} pasajeros</Text>
           </View>
+
+          <Pressable
+            style={[styles.alertBtn, alertLoading && { opacity: 0.6 }]}
+            onPress={handleAvisoSalida}
+            disabled={alertLoading}
+          >
+            {alertLoading ? <ActivityIndicator color={PerlaColors.onSurface} /> : (
+              <Text style={styles.alertBtnText}>📢 Mandar Aviso de Salida (5 min)</Text>
+            )}
+          </Pressable>
 
           <View style={styles.zarpeSection}>
             <Text style={styles.zarpeTitle}>Confirmar Zarpe</Text>
@@ -310,6 +353,21 @@ const styles = StyleSheet.create({
   },
   resCliente: { fontFamily: 'Manrope-Bold', fontSize: 22, color: PerlaColors.onSurface, marginTop: 4 },
   resPersonas: { fontFamily: 'Manrope', fontSize: 15, color: PerlaColors.onSurfaceVariant },
+  
+  alertBtn: {
+    backgroundColor: PerlaColors.surfaceContainerHigh,
+    borderRadius: 14,
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginTop: 16,
+    borderWidth: 1,
+    borderColor: PerlaColors.tertiary + '40',
+  },
+  alertBtnText: {
+    fontFamily: 'Manrope-Bold',
+    fontSize: 15,
+    color: PerlaColors.onSurface,
+  },
 
   finishedBanner: {
     backgroundColor: '#66BB6A22', borderRadius: 14, paddingVertical: 18, alignItems: 'center',

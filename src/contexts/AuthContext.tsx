@@ -1,6 +1,7 @@
 // src/contexts/AuthContext.tsx
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import { supabase } from '@/src/lib/supabase';
+import { registerForPushNotificationsAsync, updatePushToken } from '@/src/lib/notifications';
 import type { Session, User } from '@supabase/supabase-js';
 import type { RangoUsuario } from '@/src/lib/database.types';
 
@@ -103,6 +104,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         loading: false,
         initialized: true,
       }));
+
+      // 3. Register Push Token for clients
+      if (clienteData) {
+        const token = await registerForPushNotificationsAsync();
+        if (token && token !== clienteData.push_token) {
+          await updatePushToken(clienteData.id_cliente, token);
+          setState(prev => ({
+            ...prev,
+            cliente: prev.cliente ? { ...prev.cliente, push_token: token } : null
+          }));
+        }
+      }
     } catch {
       setState(prev => ({
         ...prev,

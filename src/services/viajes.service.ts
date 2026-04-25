@@ -189,6 +189,17 @@ export async function actualizarRegresoEstimado(idViaje: number, horas: number) 
   if (error) throw error;
 }
 
+/**
+ * Enviar alerta masiva a los pasajeros de un viaje.
+ */
+export async function enviarAlertaPasajeros(idViaje: number, mensaje: string) {
+  const { data, error } = await supabase.functions.invoke('broadcast-trip-alert', {
+    body: { id_viaje: idViaje, mensaje },
+  });
+  if (error) throw error;
+  return data;
+}
+
 export async function obtenerTendenciasSemanales() {
   const hoy = new Date();
   const hace7dias = new Date(hoy);

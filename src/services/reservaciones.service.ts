@@ -11,10 +11,22 @@ import { getLocalDateString } from '@/src/lib/time';
 /* ── Queries ────────────────────────────────────────────── */
 
 /**
+ * Marcar boletos vencidos (RPC).
+ */
+async function actualizarVencidos() {
+  try {
+    await supabase.rpc('check_expired_reservations');
+  } catch (e) {
+    console.error('Error actualizando boletos vencidos:', e);
+  }
+}
+
+/**
  * Obtener mis reservaciones (Comprador).
- * Busca el cliente vinculado a auth.uid() y luego sus reservaciones.
  */
 export async function obtenerMisReservaciones() {
+  await actualizarVencidos();
+  
   // 1. Find the client linked to me
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('No autenticado');
@@ -51,12 +63,15 @@ export async function obtenerMisReservaciones() {
  * Obtener reservaciones por viaje (Caseta / Barco).
  */
 export async function obtenerReservacionesPorViaje(idViaje: number) {
+  await actualizarVencidos();
+
   const { data, error } = await supabase
     .from('reservacion')
     .select(`
       *,
       cliente ( nombre_completo, telefono ),
       paquete ( descripcion, costo_persona ),
+      pago ( metodo_pago, monto_pagado ),
       detalle_reservacion ( *, paquete ( * ) )
     `)
     .eq('id_viaje', idViaje)
@@ -70,6 +85,8 @@ export async function obtenerReservacionesPorViaje(idViaje: number) {
  * Obtener todas las reservaciones del día (Caseta).
  */
 export async function obtenerReservacionesDelDia(fecha?: string) {
+  await actualizarVencidos();
+
   const hoy = fecha ?? getLocalDateString();
 
   const { data, error } = await supabase
