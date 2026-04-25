@@ -799,10 +799,25 @@ export const Constants = {
 } as const
 
 export type Descuento = Database['public']['Tables']['descuento']['Row'];
+export type Usuario = Database['public']['Tables']['usuario']['Row'];
 export type Embarcacion = Database['public']['Tables']['embarcacion']['Row'];
 export type Paquete = Database['public']['Tables']['paquete']['Row'];
 export type Viaje = Database['public']['Tables']['viaje']['Row'];
 export type Pago = Database['public']['Tables']['pago']['Row'];
 export type PagoInsert = Database['public']['Tables']['pago']['Insert'];
-export type EstadoViaje = Database['public']['Enums']['estado_viaje'];
+export type EstadoViaje = Database['public']['Enums']['estado_viaje_itinerario'];
 export type RangoUsuario = Database['public']['Enums']['rango_usuario'];
+export type Reservacion = Database['public']['Tables']['reservacion']['Row'];
+export type ReservacionInsert = Database['public']['Tables']['reservacion']['Insert'];
+export type Cliente = Database['public']['Tables']['cliente']['Row'];
+
+export type ReservacionConDetalles = Reservacion & {
+  cliente: Cliente | null;
+  paquete: Paquete | null;
+  viaje: (Viaje & { embarcacion: Embarcacion | null }) | null;
+  pago: Pago[] | null;
+  detalle_reservacion: (Tables<'detalle_reservacion'> & {
+    paquete: Paquete | null;
+  })[] | null;
+  nombre_cliente_manual?: string; // For older rows or manual entry
+};

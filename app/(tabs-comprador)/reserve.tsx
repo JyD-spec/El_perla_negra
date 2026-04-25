@@ -1,104 +1,104 @@
-import { useState, useMemo, useCallback, useEffect } from 'react';
-import {
-  StyleSheet,
-  View,
-  Text,
-  ScrollView,
-  TextInput,
-  Pressable,
-  Platform,
-  Modal,
-  KeyboardAvoidingView,
-  ActivityIndicator,
-} from 'react-native';
-import DateTimePicker, {
-  type DateTimePickerEvent,
-} from '@react-native-community/datetimepicker';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useStripe } from '@/src/components/StripeWrapper';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  ActivityIndicator,
+  FlatList,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { FlowToggle } from '@/components/ui/FlowToggle';
 import { PerlaColors } from '@/constants/theme';
 import { useAuth } from '@/src/contexts/AuthContext';
 import { useToast } from '@/src/contexts/ToastContext';
+import type { Descuento, EstadoViaje, Paquete, Viaje } from '@/src/lib/database.types';
 import { supabase } from '@/src/lib/supabase';
-import { obtenerViajesDelDia, obtenerCupoViaje } from '@/src/services/viajes.service';
-import { crearReservacion } from '@/src/services/reservaciones.service';
-import type { Paquete, Viaje } from '@/src/lib/database.types';
-import { FlowToggle } from '@/components/ui/FlowToggle';
 import { format12h, getLocalDateString } from '@/src/lib/time';
+import { obtenerDescuentos } from '@/src/services/catalogos.service';
+import { registrarPago } from '@/src/services/pagos.service';
+import { crearReservacion } from '@/src/services/reservaciones.service';
+import { obtenerCupoViaje, obtenerViajesDelDia } from '@/src/services/viajes.service';
 
 /* ────────────────────────────────────────────────────────────
    Types
    ──────────────────────────────────────────────────────────── */
 
 type ViajeConEmb = Viaje & { embarcacion: { nombre: string; capacidad_maxima: number } };
-type PaymentMethod = 'efectivo' | 'tarjeta';
-type AccountType = 'debito' | 'credito';
 
-const DISCOUNT_THRESHOLD = 5;
-const DISCOUNT_RATE = 0.10;
+const GET_STATUS_STYLE = (status: EstadoViaje) => {
+  switch (status) {
+    case 'Finalizado': return { label: 'FINALIZADO', color: '#94a3b8', bg: '#1e293b', canReserve: false };
+    case 'Cancelado': return { label: 'CANCELADO', color: '#f87171', bg: '#450a0a', canReserve: false };
+    case 'En_Navegacion': return { label: 'EN NAVEGACIÓN', color: '#60a5fa', bg: '#172554', canReserve: false };
+    case 'Abordando': return { label: 'ACTIVO', color: '#fbbf24', bg: '#451a03', canReserve: true };
+    case 'Retrasado': return { label: 'RETRASADO', color: '#fb923c', bg: '#431407', canReserve: true };
+    case 'Programado': return { label: 'PROGRAMADO', color: '#34d399', bg: '#064e3b', canReserve: true };
+    default: return { label: String(status).toUpperCase(), color: '#94a3b8', bg: '#1e293b', canReserve: true };
+  }
+};
 
 /* ────────────────────────────────────────────────────────────
-   Reservation Screen – Redesigned & Functional
+   Comprador – Reservation Screen
    ──────────────────────────────────────────────────────────── */
 
 export default function ReservarScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { user } = useAuth();
+  const { user, cliente } = useAuth();
   const toast = useToast();
-  const params = useLocalSearchParams<{ paquete?: string; bebida?: string }>();
+  const params = useLocalSearchParams<{ paquete?: string }>();
 
   /* ─── Data state ───────────────────────────────────────── */
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [paquetes, setPaquetes] = useState<Paquete[]>([]);
+  const [allDiscounts, setAllDiscounts] = useState<Descuento[]>([]);
+  const [selectedDiscount, setSelectedDiscount] = useState<Descuento | null>(null);
   const [viajes, setViajes] = useState<ViajeConEmb[]>([]);
   const [cupos, setCupos] = useState<Record<number, number>>({});
 
   /* ─── Form state ───────────────────────────────────────── */
-  const [selectedPackage, setSelectedPackage] = useState<number | null>(null);
-  const [selectedViaje, setSelectedViaje] = useState<ViajeConEmb | null>(null);
+  const [packageSelections, setPackageSelections] = useState<Record<number, number>>({});
   const [personas, setPersonas] = useState<string>('1');
-  const [nombre, setNombre] = useState('');
-  const [telefono, setTelefono] = useState('');
+  const [email, setEmail] = useState('');
 
   /* ─── Date state ───────────────────────────────────────── */
   const [date, setDate] = useState<Date>(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
 
-  /* ─── Payment state ────────────────────────────────────── */
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('efectivo');
-  const [accountNumber, setAccountNumber] = useState('');
-  const [accountType, setAccountType] = useState<AccountType>('debito');
-
-  /* ─── Initial Load ─────────────────────────────────────── */
+  /* ─── Initial Load & Pre-fill ──────────────────────────── */
   useEffect(() => {
     (async () => {
       try {
-        const { data: paqData } = await supabase.from('paquete').select('*');
-        setPaquetes(paqData || []);
+        const [paqData, descData] = await Promise.all([
+          supabase.from('paquete').select('*'),
+          obtenerDescuentos()
+        ]);
+
+        setPaquetes(paqData.data || []);
+        setAllDiscounts(descData || []);
         
-        // Auto-select package if coming from params
-        if (params.paquete && paqData) {
-          const p = paqData.find(x => x.descripcion.toLowerCase().includes(params.paquete!.toLowerCase()));
-          if (p) setSelectedPackage(p.id_paquete);
-        } else if (paqData && paqData.length > 0) {
-          setSelectedPackage(paqData[0].id_paquete);
+        // Auto-select package from params
+        if (params.paquete && paqData.data) {
+          const p = paqData.data.find(x => x.descripcion.toLowerCase().includes(params.paquete!.toLowerCase()));
+          if (p) setPackageSelections({ [p.id_paquete]: 1 });
+        } else if (paqData.data && paqData.data.length > 0) {
+          setPackageSelections({ [paqData.data[0].id_paquete]: 1 });
         }
 
-        // Fill user data
+        // Pre-fill email
         if (user) {
-          const { data: profile } = await supabase
-            .from('cliente')
-            .select('nombre_completo, telefono')
-            .eq('auth_id', user.id)
-            .maybeSingle();
-          
-          if (profile) {
-            setNombre(profile.nombre_completo || '');
-            setTelefono(profile.telefono || '');
-          }
+          setEmail(user.email || '');
         }
       } catch (err) {
         console.error('Error loading initial data:', err);
@@ -106,20 +106,18 @@ export default function ReservarScreen() {
         setLoading(false);
       }
     })();
-  }, [user, params.paquete]);
+  }, [user, cliente, params.paquete]);
 
   /* ─── Fetch Trips when Date changes ────────────────────── */
+  const [selectedViaje, setSelectedViaje] = useState<ViajeConEmb | null>(null);
   useEffect(() => {
     (async () => {
       const formatted = getLocalDateString(date);
       try {
         const viajesData = await obtenerViajesDelDia(formatted);
         setViajes(viajesData as ViajeConEmb[]);
-        
-        // Reset selected trip if it's not in the new list
         setSelectedViaje(null);
 
-        // Fetch remaining spots
         const cupoResults = await Promise.all(
           viajesData.map(v => obtenerCupoViaje(v.id_viaje).then(c => ({ id: v.id_viaje, cupo: c })))
         );
@@ -132,30 +130,78 @@ export default function ReservarScreen() {
     })();
   }, [date]);
 
-  /* ─── Derived values ───────────────────────────────────── */
+  const filteredViajes = useMemo(() => {
+    return viajes
+      .filter((v) => {
+        // Only show Programmed or Active (Abordando) trips for clients
+        if (v.estado_viaje !== 'Programado' && v.estado_viaje !== 'Abordando' && v.estado_viaje !== 'Retrasado') {
+          return false;
+        }
+        return true;
+      })
+      .sort((a, b) => a.hora_salida_programada.localeCompare(b.hora_salida_programada));
+  }, [viajes]);
+
   const personasNum = useMemo(() => {
     const n = parseInt(personas, 10);
     return isNaN(n) || n < 1 ? 1 : n;
   }, [personas]);
 
-  const activePaquete = useMemo(
-    () => paquetes.find((p) => p.id_paquete === selectedPackage),
-    [selectedPackage, paquetes]
-  );
+  // Sync package selections
+  useEffect(() => {
+    if (paquetes.length === 0) return;
+    const totalSelected = Object.values(packageSelections).reduce((a, b) => a + b, 0);
+    const diff = personasNum - totalSelected;
+    if (diff !== 0) {
+      if (totalSelected === 0) {
+        setPackageSelections({ [paquetes[0].id_paquete]: personasNum });
+      } else {
+        const firstId = Object.keys(packageSelections).find(id => packageSelections[Number(id)] > 0) 
+                        || paquetes[0].id_paquete.toString();
+        setPackageSelections(prev => {
+          const newVal = Math.max(0, (prev[Number(firstId)] || 0) + diff);
+          return { ...prev, [firstId]: newVal };
+        });
+      }
+    }
+  }, [personasNum, paquetes.length]);
 
-  const hasDiscount = personasNum >= DISCOUNT_THRESHOLD;
-  const subtotal = (activePaquete?.costo_persona || 0) * personasNum;
-  const discount = hasDiscount ? subtotal * DISCOUNT_RATE : 0;
-  const total = subtotal - discount;
+  const subtotal = useMemo(() => {
+    return Object.entries(packageSelections).reduce((acc, [id, qty]) => {
+      const p = paquetes.find(x => x.id_paquete === Number(id));
+      return acc + (p?.costo_persona || 0) * qty;
+    }, 0);
+  }, [packageSelections, paquetes]);
+
+  // Logic for automatic discount
+  useEffect(() => {
+    const applicable = allDiscounts.filter(d => {
+      if (!d.activo || !d.es_default) return false;
+      if (d.cantidad_minima_boletos && personasNum < d.cantidad_minima_boletos) return false;
+      if (d.id_paquete_condicion) {
+        const qty = packageSelections[Number(d.id_paquete_condicion)] || 0;
+        if (qty < (d.cantidad_minima_boletos || 1)) return false;
+      }
+      return true;
+    });
+    const bestDefault = applicable.sort((a, b) => Number(b.porcentaje) - Number(a.porcentaje))[0];
+    setSelectedDiscount(bestDefault || null);
+  }, [personasNum, packageSelections, allDiscounts]);
+
+  const discountAmount = useMemo(() => {
+    if (!selectedDiscount) return 0;
+    return subtotal * (Number(selectedDiscount.porcentaje) / 100);
+  }, [subtotal, selectedDiscount]);
+
+  const total = subtotal - discountAmount;
 
   /* ─── Handlers ─────────────────────────────────────────── */
-  const onDateChange = useCallback(
-    (_event: DateTimePickerEvent, selected?: Date) => {
-      setShowDatePicker(Platform.OS === 'ios');
-      if (selected) setDate(selected);
-    },
-    []
-  );
+  const onDateChange = (_: any, selectedDate?: Date) => {
+    setShowDatePicker(false);
+    if (selectedDate) setDate(selectedDate);
+  };
+
+  const { initPaymentSheet, presentPaymentSheet } = useStripe();
 
   const formatDate = useCallback((d: Date) => {
     return d.toLocaleDateString('es-MX', {
@@ -167,55 +213,103 @@ export default function ReservarScreen() {
   }, []);
 
   const handleReservar = async () => {
-    if (!selectedPackage) {
-      toast.warning('Por favor selecciona un paquete.');
-      return;
-    }
-    if (!selectedViaje) {
-      toast.warning('Por favor selecciona un horario de salida.');
-      return;
-    }
-    if (!nombre.trim()) {
-      toast.warning('Por favor ingresa tu nombre.');
-      return;
-    }
-    if (!telefono.trim() || telefono.length < 10) {
-      toast.warning('Por favor ingresa un teléfono válido (10 dígitos).');
-      return;
-    }
+    const totalAsignado = Object.values(packageSelections).reduce((a, b) => a + b, 0);
+    if (totalAsignado !== personasNum) return toast.warning('Asigna todos los lugares.');
+    if (!cliente) return toast.error('Error al obtener tu perfil de usuario.');
+    const nombre = cliente.nombre_completo;
+    const telefono = cliente.telefono;
+    const lada = cliente.lada || '+52';
+    
+    if (!selectedViaje) return toast.warning('Selecciona un horario de salida.');
+    if (!email.trim()) return toast.warning('Se requiere email para el recibo.');
 
     const disp = selectedViaje.embarcacion.capacidad_maxima - (cupos[selectedViaje.id_viaje] ?? 0);
-    if (personasNum > disp) {
-      toast.warning(`Cupo insuficiente. Solo quedan ${disp} lugares.`);
-      return;
-    }
+    if (personasNum > disp) return toast.warning(`Cupo insuficiente (Máx: ${disp}).`);
 
     setSaving(true);
     try {
-      await crearReservacion({
-        nombreCliente: nombre.trim(),
-        telefono: telefono.trim(),
-        idPaquete: selectedPackage,
-        idViaje: selectedViaje.id_viaje,
-        cantidadPersonas: personasNum,
+      // 1. Stripe Payment
+      const { data: sheetData, error: sheetError } = await supabase.functions.invoke('stripe-payment-sheet', {
+        body: {
+          amount: total,
+          currency: 'mxn',
+          email: email.trim(),
+          name: nombre.trim(),
+          phone: `${lada}${telefono}`,
+        }
       });
 
-      toast.success('¡Reservación Exitosa! Bienvenido a bordo, capitán.');
-      
-      setTimeout(() => {
-        router.replace('/(tabs-comprador)/tickets');
-      }, 2000);
+      if (sheetError) throw new Error(sheetError.message || 'Error al conectar con Stripe');
+
+      const { error: initError } = await initPaymentSheet({
+        merchantDisplayName: 'El Perla Negra',
+        customerId: sheetData.customer,
+        customerEphemeralKeySecret: sheetData.ephemeralKey,
+        paymentIntentClientSecret: sheetData.paymentIntent,
+        allowsDelayedPaymentMethods: true,
+        defaultBillingDetails: {
+          name: nombre.trim(),
+          email: email.trim(),
+          phone: `${lada}${telefono}`,
+        },
+        appearance: {
+          colors: {
+            primary: PerlaColors.tertiary,
+            background: PerlaColors.surfaceContainerLow,
+            componentBackground: PerlaColors.surfaceContainer,
+            componentDivider: PerlaColors.outlineVariant,
+            primaryText: PerlaColors.onSurface,
+            secondaryText: PerlaColors.onSurfaceVariant,
+            placeholderText: PerlaColors.onSurfaceVariant + '60',
+            icon: PerlaColors.tertiary,
+          },
+          shapes: { borderRadius: 12 },
+        }
+      });
+
+      if (initError) throw initError;
+
+      const { error: presentError } = await presentPaymentSheet();
+      if (presentError) {
+        if (presentError.code === 'Canceled') {
+          setSaving(false);
+          return;
+        }
+        throw presentError;
+      }
+
+      // 2. Create Reservation
+      const res = await crearReservacion({
+        nombreCliente: nombre.trim(),
+        telefono: telefono.trim(),
+        lada,
+        email: email.trim(),
+        authId: user?.id,
+        paquetes: Object.entries(packageSelections)
+          .filter(([_, qty]) => qty > 0)
+          .map(([id, qty]) => ({ idPaquete: Number(id), cantidad: qty })),
+        idViaje: selectedViaje.id_viaje,
+        cantidadPersonas: personasNum,
+        estadoPase: 'Aprobado',
+        estadoPago: 'Pagado',
+      });
+
+      // 3. Register Payment
+      await registrarPago({
+        id_reservacion: res.id_reservacion,
+        metodo_pago: 'Stripe',
+        monto_pagado: total,
+      });
+
+      toast.success('¡Reservación Exitosa! Bienvenido a bordo.');
+      router.replace('/(tabs-comprador)/tickets');
     } catch (err: any) {
-      toast.error('Ocurrió un error al procesar tu reservación.');
+      toast.error(err.message || 'Error al procesar la operación.');
       console.error(err);
     } finally {
       setSaving(false);
     }
   };
-
-  /* ─── Increment / Decrement helpers ────────────────────── */
-  const incrementPersonas = () => setPersonas(String(Math.min(personasNum + 1, 50)));
-  const decrementPersonas = () => setPersonas(String(Math.max(personasNum - 1, 1)));
 
   if (loading) {
     return (
@@ -234,69 +328,26 @@ export default function ReservarScreen() {
         style={styles.root}
         contentContainerStyle={[
           styles.scrollContent,
-          { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 100 },
+          { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 120 },
         ]}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        {/* ── Header ──────────────────────────────────── */}
         <Text style={styles.screenTitle}>Reservar Aventura</Text>
-        <Text style={styles.screenSubtitle}>
-          Prepara tu tripulación para zarpar
-        </Text>
+        <Text style={styles.screenSubtitle}>Prepara tu tripulación para zarpar</Text>
 
         <FlowToggle activeTab="reserve" />
 
-        {/* ════════════════════════════════════════════════
-            SECTION 1: Paquete
-            ════════════════════════════════════════════════ */}
+        {/* 1. Tripulación y Paquetes */}
         <View style={styles.sectionHeader}>
-          <Text style={styles.sectionNumber}>1</Text>
-          <Text style={styles.sectionLabel}>Elige tu Paquete</Text>
+          <View style={styles.sectionNumber}><Text style={styles.sectionNumberText}>1</Text></View>
+          <Text style={styles.sectionLabel}>Tu Tripulación</Text>
         </View>
 
-        {paquetes.map((pkg) => {
-          const isSelected = selectedPackage === pkg.id_paquete;
-          return (
-            <Pressable
-              key={pkg.id_paquete}
-              style={[
-                styles.packageOption,
-                isSelected && styles.packageOptionSelected,
-              ]}
-              onPress={() => setSelectedPackage(pkg.id_paquete)}
-            >
-              <View style={styles.packageLeft}>
-                <View style={[styles.radioOuter, isSelected && styles.radioOuterSelected]}>
-                  {isSelected && <View style={styles.radioInner} />}
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.packageName}>
-                    {pkg.descripcion.includes('Comida') ? '🍽️' : pkg.descripcion.includes('Fiesta') ? '🍹' : '🧭'}  {pkg.descripcion}
-                  </Text>
-                  <Text style={styles.packageDesc}>{pkg.descripcion}</Text>
-                </View>
-              </View>
-              <Text style={[styles.packagePrice, isSelected && styles.packagePriceSelected]}>
-                ${pkg.costo_persona}
-              </Text>
-            </Pressable>
-          );
-        })}
-
-        {/* ════════════════════════════════════════════════
-            SECTION 2: Personas y Fecha
-            ════════════════════════════════════════════════ */}
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionNumber}>2</Text>
-          <Text style={styles.sectionLabel}>Personas y Fecha</Text>
-        </View>
-
-        {/* Personas counter */}
         <View style={styles.fieldCard}>
-          <Text style={styles.fieldLabel}>Número de Personas</Text>
+          <Text style={styles.fieldLabel}>Cantidad de Personas</Text>
           <View style={styles.counterRow}>
-            <Pressable style={styles.counterBtn} onPress={decrementPersonas}>
+            <Pressable style={styles.counterBtn} onPress={() => setPersonas(String(Math.max(personasNum - 1, 1)))}>
               <Text style={styles.counterBtnText}>−</Text>
             </Pressable>
             <TextInput
@@ -304,272 +355,214 @@ export default function ReservarScreen() {
               value={personas}
               onChangeText={setPersonas}
               keyboardType="number-pad"
-              maxLength={2}
               textAlign="center"
             />
-            <Pressable style={styles.counterBtn} onPress={incrementPersonas}>
+            <Pressable style={styles.counterBtn} onPress={() => setPersonas(String(Math.min(personasNum + 1, 50)))}>
               <Text style={styles.counterBtnText}>+</Text>
             </Pressable>
           </View>
-          {hasDiscount && (
-            <View style={styles.discountBadge}>
-              <Text style={styles.discountBadgeText}>
-                🏷️  ¡10% de descuento aplicado!
-              </Text>
-            </View>
-          )}
         </View>
 
-        {/* Date picker */}
-        <View style={styles.fieldCard}>
-          <Text style={styles.fieldLabel}>Fecha de Reservación</Text>
-          <Pressable
-            style={styles.dateButton}
-            onPress={() => setShowDatePicker(true)}
-          >
-            <Text style={styles.dateIcon}>📅</Text>
-            <Text style={styles.dateText}>{formatDate(date)}</Text>
-          </Pressable>
+        <View style={styles.packageList}>
+          {paquetes.map((pkg) => {
+            const qty = packageSelections[pkg.id_paquete] || 0;
+            return (
+              <View key={pkg.id_paquete} style={[styles.packageItem, qty > 0 && styles.packageItemSelected]}>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.packageName, qty > 0 && styles.packageNameSelected]}>{pkg.descripcion}</Text>
+                  <Text style={styles.packagePrice}>${pkg.costo_persona} <Text style={{ fontSize: 12 }}>MXN</Text></Text>
+                </View>
+                <View style={styles.packageCounter}>
+                  <Pressable 
+                    style={styles.miniCounterBtn} 
+                    onPress={() => setPackageSelections(prev => ({ ...prev, [pkg.id_paquete]: Math.max(0, (prev[pkg.id_paquete] || 0) - 1) }))}
+                  >
+                    <Text style={styles.miniCounterText}>−</Text>
+                  </Pressable>
+                  <Text style={styles.packageQty}>{qty}</Text>
+                  <Pressable 
+                    style={styles.miniCounterBtn} 
+                    onPress={() => {
+                      const currentTotal = Object.values(packageSelections).reduce((a, b) => a + b, 0);
+                      if (currentTotal < personasNum) {
+                        setPackageSelections(prev => ({ ...prev, [pkg.id_paquete]: (prev[pkg.id_paquete] || 0) + 1 }));
+                      } else {
+                        toast.warning(`Ya asignaste los ${personasNum} lugares.`);
+                      }
+                    }}
+                  >
+                    <Text style={styles.miniCounterText}>+</Text>
+                  </Pressable>
+                </View>
+              </View>
+            );
+          })}
         </View>
+
+        {/* 2. Fecha y Horario */}
+        <View style={styles.sectionHeader}>
+          <View style={styles.sectionNumber}><Text style={styles.sectionNumberText}>2</Text></View>
+          <Text style={styles.sectionLabel}>Fecha y Horario</Text>
+        </View>
+
+        <Pressable style={styles.datePickerBtn} onPress={() => setShowDatePicker(true)}>
+          <Text style={styles.dateText}>📅 {formatDate(date)}</Text>
+        </Pressable>
 
         {showDatePicker && (
-          <DateTimePicker
-            value={date}
-            mode="date"
-            display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-            minimumDate={new Date()}
-            onChange={onDateChange}
-            themeVariant="dark"
-          />
+          <DateTimePicker value={date} mode="date" display="default" minimumDate={new Date()} onChange={onDateChange} />
         )}
 
-        {/* ─── Trip Selection (Functional Add-on) ────── */}
-        {viajes.length > 0 ? (
-          <>
-            <View style={[styles.sectionHeader, { marginTop: 20 }]}>
-              <Text style={styles.sectionNumber}>3</Text>
-              <Text style={styles.sectionLabel}>Horario de Salida</Text>
-            </View>
-            {viajes.map((v) => {
-              const isSelected = selectedViaje?.id_viaje === v.id_viaje;
-              const disp = v.embarcacion.capacidad_maxima - (cupos[v.id_viaje] ?? 0);
-              const isFull = disp <= 0;
+        <View style={{ marginTop: 12 }}>
+          {filteredViajes.map((v) => {
+            const isSelected = selectedViaje?.id_viaje === v.id_viaje;
+            const disp = v.embarcacion.capacidad_maxima - (cupos[v.id_viaje] ?? 0);
+            const statusCfg = GET_STATUS_STYLE(v.estado_viaje as EstadoViaje);
+            const isFull = disp <= 0;
 
-              return (
-                <Pressable
-                  key={v.id_viaje}
-                  disabled={isFull}
-                  style={[
-                    styles.packageOption,
-                    isSelected && styles.packageOptionSelected,
-                    isFull && { opacity: 0.5 }
-                  ]}
-                  onPress={() => setSelectedViaje(v)}
-                >
-                  <View style={styles.packageLeft}>
-                    <View style={[styles.radioOuter, isSelected && styles.radioOuterSelected]}>
-                      {isSelected && <View style={styles.radioInner} />}
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.packageName}>🚢 {format12h(v.hora_salida_programada)}</Text>
-                      <Text style={styles.packageDesc}>{v.embarcacion.nombre}</Text>
+            return (
+              <Pressable
+                key={v.id_viaje}
+                disabled={isFull}
+                style={[styles.tripItem, isSelected && styles.tripItemSelected, isFull && { opacity: 0.5 }]}
+                onPress={() => setSelectedViaje(v)}
+              >
+                <View style={{ flex: 1 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <Text style={styles.tripTime}>{format12h(v.hora_salida_programada)}</Text>
+                    <View style={[styles.statusBadge, { backgroundColor: statusCfg.bg }]}>
+                      <Text style={[styles.statusBadgeText, { color: statusCfg.color }]}>{statusCfg.label}</Text>
                     </View>
                   </View>
-                  <Text style={[styles.packagePrice, isSelected && styles.packagePriceSelected, { fontSize: 13, fontFamily: 'Manrope' }]}>
-                    {isFull ? 'Agotado' : `${disp} lugares`}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </>
-        ) : (
-          <View style={styles.paymentNote}>
-            <Text style={styles.paymentNoteIcon}>⚠️</Text>
-            <Text style={styles.paymentNoteText}>No hay viajes programados para esta fecha.</Text>
-          </View>
-        )}
-
-        {/* ════════════════════════════════════════════════
-            SECTION 3: Datos del Cliente (Now Section 4)
-            ════════════════════════════════════════════════ */}
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionNumber}>4</Text>
-          <Text style={styles.sectionLabel}>Datos del Capitán</Text>
+                  <Text style={styles.tripBoat}>{v.embarcacion.nombre}</Text>
+                </View>
+                <Text style={styles.tripSpots}>{isFull ? 'Agotado' : `${disp} disp.`}</Text>
+              </Pressable>
+            );
+          })}
+          {filteredViajes.length === 0 && <Text style={styles.emptyText}>No hay viajes disponibles hoy.</Text>}
         </View>
 
-        <View style={styles.fieldCard}>
-          <Text style={styles.fieldLabel}>Nombre Completo</Text>
-          <TextInput
-            style={styles.textInput}
-            value={nombre}
-            onChangeText={setNombre}
-            placeholder="Ej. Jack Sparrow"
-            placeholderTextColor={PerlaColors.onSurfaceVariant + '60'}
-            autoCapitalize="words"
-          />
-        </View>
-
-        <View style={styles.fieldCard}>
-          <Text style={styles.fieldLabel}>Teléfono</Text>
-          <TextInput
-            style={styles.textInput}
-            value={telefono}
-            onChangeText={setTelefono}
-            placeholder="10 dígitos"
-            placeholderTextColor={PerlaColors.onSurfaceVariant + '60'}
-            keyboardType="phone-pad"
-            maxLength={10}
-          />
-        </View>
-
-        {/* ════════════════════════════════════════════════
-            SECTION 4: Método de Pago (Now Section 5)
-            ════════════════════════════════════════════════ */}
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionNumber}>5</Text>
-          <Text style={styles.sectionLabel}>Método de Pago</Text>
-        </View>
-
-        <View style={styles.paymentToggleRow}>
-          <Pressable
-            style={[styles.paymentToggle, paymentMethod === 'efectivo' && styles.paymentToggleActive]}
-            onPress={() => setPaymentMethod('efectivo')}
-          >
-            <Text style={styles.paymentToggleIcon}>💵</Text>
-            <Text style={[styles.paymentToggleText, paymentMethod === 'efectivo' && styles.paymentToggleTextActive]}>Efectivo</Text>
-          </Pressable>
-
-          <Pressable
-            style={[styles.paymentToggle, paymentMethod === 'tarjeta' && styles.paymentToggleActive]}
-            onPress={() => setPaymentMethod('tarjeta')}
-          >
-            <Text style={styles.paymentToggleIcon}>💳</Text>
-            <Text style={[styles.paymentToggleText, paymentMethod === 'tarjeta' && styles.paymentToggleTextActive]}>Tarjeta</Text>
-          </Pressable>
-        </View>
-
-        {paymentMethod === 'efectivo' ? (
-          <View style={styles.paymentNote}>
-            <Text style={styles.paymentNoteIcon}>ℹ️</Text>
-            <Text style={styles.paymentNoteText}>El pago se realizará en caseta al momento de abordar para liberar tu boleto.</Text>
-          </View>
-        ) : (
-          <View style={styles.cardFields}>
-            <View style={styles.fieldCard}>
-              <Text style={styles.fieldLabel}>Número de Cuenta</Text>
-              <TextInput
-                style={styles.textInput}
-                value={accountNumber}
-                onChangeText={setAccountNumber}
-                placeholder="•••• •••• •••• ••••"
-                placeholderTextColor={PerlaColors.onSurfaceVariant + '60'}
-                keyboardType="number-pad"
-                maxLength={16}
-              />
-            </View>
-          </View>
-        )}
-
-        {/* ════════════════════════════════════════════════
-            RESUMEN & CTA
-            ════════════════════════════════════════════════ */}
+        {/* 3. Resumen y Pago */}
         <View style={styles.summaryCard}>
-          <Text style={styles.summaryTitle}>Resumen de Reservación</Text>
-
+          <Text style={styles.summaryTitle}>Resumen de Pago</Text>
+          
           <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>
-              {activePaquete?.descripcion.includes('Comida') ? '🍽️' : activePaquete?.descripcion.includes('Fiesta') ? '🍹' : '🧭'} {activePaquete?.descripcion || 'Paquete'}
-            </Text>
-            <Text style={styles.summaryValue}>${activePaquete?.costo_persona || 0} × {personasNum}</Text>
+            <Text style={styles.summaryLab}>Capitán</Text>
+            <Text style={styles.summaryValSmall}>{cliente?.nombre_completo || 'Tripulante'}</Text>
           </View>
 
           <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>Subtotal</Text>
-            <Text style={styles.summaryValue}>${subtotal.toLocaleString()} MXN</Text>
+            <Text style={styles.summaryLab}>Teléfono</Text>
+            <Text style={styles.summaryValSmall}>{cliente?.lada}{cliente?.telefono}</Text>
           </View>
-
-          {hasDiscount && (
-            <View style={styles.summaryRow}>
-              <Text style={[styles.summaryLabel, { color: '#4ade80' }]}>Descuento 10%</Text>
-              <Text style={[styles.summaryValue, { color: '#4ade80' }]}>-${discount.toLocaleString()} MXN</Text>
-            </View>
-          )}
 
           <View style={styles.divider} />
 
           <View style={styles.summaryRow}>
-            <Text style={styles.totalLabel}>Total</Text>
-            <Text style={styles.totalValue}>${total.toLocaleString()} MXN</Text>
+            <Text style={styles.summaryLab}>Subtotal</Text>
+            <Text style={styles.summaryValSmall}>${subtotal.toLocaleString()} MXN</Text>
           </View>
-        </View>
 
-        {/* Main CTA */}
-        <Pressable 
-          style={[styles.reserveButton, (saving || !selectedViaje) && styles.reserveButtonDisabled]} 
-          onPress={handleReservar}
-          disabled={saving}
-        >
-          {saving ? (
-            <ActivityIndicator color={PerlaColors.onTertiary} />
-          ) : (
-            <Text style={styles.reserveButtonText}>⚓ Confirmar Reservación</Text>
+          {selectedDiscount && (
+            <View style={styles.summaryRow}>
+              <Text style={[styles.summaryLab, { color: '#4ade80' }]}>Descuento ({selectedDiscount.nombre})</Text>
+              <Text style={[styles.summaryValSmall, { color: '#4ade80' }]}>-${discountAmount.toLocaleString()} MXN</Text>
+            </View>
           )}
-        </Pressable>
+
+          <View style={styles.divider} />
+          
+          <View style={styles.summaryRow}>
+            <Text style={styles.summaryLabTotal}>Total</Text>
+            <Text style={styles.summaryValTotal}>${total.toLocaleString()} MXN</Text>
+          </View>
+
+          <Pressable 
+            style={[styles.confirmBtn, (saving || !selectedViaje) && { opacity: 0.6 }]} 
+            onPress={handleReservar}
+            disabled={saving || !selectedViaje}
+          >
+            {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.confirmBtnText}>⚓ Pagar con Tarjeta</Text>}
+          </Pressable>
+          
+          <Text style={styles.pagoSeguro}>🔒 Pago seguro procesado por Stripe</Text>
+        </View>
       </ScrollView>
+
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: PerlaColors.background },
-  centered: { alignItems: 'center', justifyContent: 'center' },
+  centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   scrollContent: { paddingHorizontal: 20 },
-  screenTitle: { fontFamily: 'Newsreader', fontSize: 34, color: PerlaColors.onSurface, marginBottom: 6 },
-  screenSubtitle: { fontFamily: 'Manrope', fontSize: 15, color: PerlaColors.onSurfaceVariant, marginBottom: 28 },
-  sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 32, marginBottom: 16 },
-  sectionNumber: { fontFamily: 'Newsreader', fontSize: 18, color: PerlaColors.onTertiary, backgroundColor: PerlaColors.tertiary, width: 32, height: 32, borderRadius: 16, textAlign: 'center', lineHeight: 32, overflow: 'hidden' },
-  sectionLabel: { fontFamily: 'Manrope-SemiBold', fontSize: 18, color: PerlaColors.onSurface, letterSpacing: 0.3 },
-  packageOption: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: PerlaColors.surfaceContainerLow, borderRadius: 16, padding: 18, marginBottom: 10, borderWidth: 1.5, borderColor: 'transparent' },
-  packageOptionSelected: { borderColor: PerlaColors.tertiary + '80', backgroundColor: PerlaColors.surfaceContainer },
-  packageLeft: { flexDirection: 'row', alignItems: 'center', gap: 14, flex: 1 },
-  radioOuter: { width: 22, height: 22, borderRadius: 11, borderWidth: 2, borderColor: PerlaColors.outline, alignItems: 'center', justifyContent: 'center' },
-  radioOuterSelected: { borderColor: PerlaColors.tertiary },
-  radioInner: { width: 12, height: 12, borderRadius: 6, backgroundColor: PerlaColors.tertiary },
-  packageName: { fontFamily: 'Manrope-SemiBold', fontSize: 15, color: PerlaColors.onSurface, marginBottom: 2 },
-  packageDesc: { fontFamily: 'Manrope', fontSize: 12, color: PerlaColors.onSurfaceVariant },
-  packagePrice: { fontFamily: 'Newsreader', fontSize: 22, color: PerlaColors.onSurfaceVariant, marginLeft: 8 },
-  packagePriceSelected: { color: PerlaColors.tertiary },
-  fieldCard: { backgroundColor: PerlaColors.surfaceContainerLow, borderRadius: 16, padding: 18, marginBottom: 12 },
-  fieldLabel: { fontFamily: 'Manrope-SemiBold', fontSize: 13, color: PerlaColors.onSurfaceVariant, letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: 12 },
-  counterRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 16 },
-  counterBtn: { width: 52, height: 52, borderRadius: 14, backgroundColor: PerlaColors.surfaceContainerHighest, alignItems: 'center', justifyContent: 'center' },
-  counterBtnText: { fontFamily: 'Manrope-Bold', fontSize: 24, color: PerlaColors.onSurface },
-  counterInput: { fontFamily: 'Newsreader', fontSize: 36, color: PerlaColors.tertiary, minWidth: 60, textAlign: 'center' },
-  discountBadge: { marginTop: 14, backgroundColor: '#4ade801A', borderRadius: 10, paddingVertical: 8, paddingHorizontal: 14, alignSelf: 'center' },
-  discountBadgeText: { fontFamily: 'Manrope-SemiBold', fontSize: 13, color: '#4ade80', textAlign: 'center' },
-  dateButton: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: PerlaColors.surfaceContainerHighest, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 14 },
-  dateIcon: { fontSize: 20 },
-  dateText: { fontFamily: 'Manrope-Medium', fontSize: 15, color: PerlaColors.onSurface, textTransform: 'capitalize', flex: 1 },
-  textInput: { fontFamily: 'Manrope', fontSize: 16, color: PerlaColors.onSurface, backgroundColor: PerlaColors.surfaceContainerHighest, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 14, borderWidth: 1, borderColor: PerlaColors.outlineVariant + '26' },
-  paymentToggleRow: { flexDirection: 'row', gap: 12, marginBottom: 16 },
-  paymentToggle: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, backgroundColor: PerlaColors.surfaceContainerLow, borderRadius: 16, paddingVertical: 20, borderWidth: 1.5, borderColor: 'transparent' },
-  paymentToggleActive: { borderColor: PerlaColors.tertiary + '80', backgroundColor: PerlaColors.surfaceContainer },
-  paymentToggleIcon: { fontSize: 24 },
-  paymentToggleText: { fontFamily: 'Manrope-SemiBold', fontSize: 16, color: PerlaColors.onSurfaceVariant },
-  paymentToggleTextActive: { color: PerlaColors.onSurface },
-  paymentNote: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, backgroundColor: PerlaColors.primaryContainer + '40', borderRadius: 12, padding: 16 },
-  paymentNoteIcon: { fontSize: 16, marginTop: 2 },
-  paymentNoteText: { fontFamily: 'Manrope', fontSize: 13, color: PerlaColors.primary, flex: 1, lineHeight: 20 },
-  cardFields: { marginBottom: 4 },
-  summaryCard: { backgroundColor: PerlaColors.surfaceContainerLow, borderRadius: 20, padding: 24, marginTop: 32, borderWidth: 1, borderColor: PerlaColors.outlineVariant + '26' },
-  summaryTitle: { fontFamily: 'Newsreader', fontSize: 22, color: PerlaColors.onSurface, marginBottom: 20 },
-  summaryRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
-  summaryLabel: { fontFamily: 'Manrope', fontSize: 14, color: PerlaColors.onSurfaceVariant },
-  summaryValue: { fontFamily: 'Manrope-Medium', fontSize: 14, color: PerlaColors.onSurface },
-  divider: { height: 1, backgroundColor: PerlaColors.outlineVariant + '33', marginVertical: 14 },
-  totalLabel: { fontFamily: 'Manrope-Bold', fontSize: 18, color: PerlaColors.onSurface },
-  totalValue: { fontFamily: 'Newsreader', fontSize: 28, color: PerlaColors.tertiary },
-  reserveButton: { backgroundColor: PerlaColors.tertiary, borderRadius: 16, paddingVertical: 20, alignItems: 'center', marginTop: 24, shadowColor: PerlaColors.tertiary, shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.3, shadowRadius: 20, elevation: 8 },
-  reserveButtonDisabled: { backgroundColor: PerlaColors.surfaceContainerHighest, shadowOpacity: 0, elevation: 0, opacity: 0.6 },
-  reserveButtonText: { fontFamily: 'Manrope-Bold', fontSize: 18, color: PerlaColors.onTertiary, letterSpacing: 0.5 },
+  screenTitle: { fontFamily: 'Newsreader-Bold', fontSize: 32, color: PerlaColors.onSurface, marginBottom: 4 },
+  screenSubtitle: { fontFamily: 'Manrope', fontSize: 14, color: PerlaColors.onSurfaceVariant, marginBottom: 20 },
+  
+  sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 20, marginBottom: 16 },
+  sectionNumber: { width: 24, height: 24, borderRadius: 12, backgroundColor: PerlaColors.tertiary, alignItems: 'center', justifyContent: 'center' },
+  sectionNumberText: { color: PerlaColors.onTertiary, fontSize: 12, fontWeight: 'bold' },
+  sectionLabel: { fontFamily: 'Manrope-Bold', fontSize: 16, color: PerlaColors.onSurface },
+
+  fieldCard: { backgroundColor: PerlaColors.surfaceContainerLow, borderRadius: 16, padding: 16, marginBottom: 12 },
+  fieldLabel: { fontFamily: 'Manrope-SemiBold', fontSize: 12, color: PerlaColors.onSurfaceVariant, marginBottom: 8 },
+  
+  counterRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 24 },
+  counterBtn: { width: 44, height: 44, borderRadius: 12, backgroundColor: PerlaColors.surfaceContainerHighest, alignItems: 'center', justifyContent: 'center' },
+  counterBtnText: { fontSize: 20, color: PerlaColors.onSurface },
+  counterInput: { fontSize: 32, color: PerlaColors.tertiary, minWidth: 60, fontWeight: 'bold', textAlign: 'center', fontFamily: 'Newsreader' },
+
+  packageList: { gap: 8 },
+  packageItem: { flexDirection: 'row', justifyContent: 'space-between', padding: 16, borderRadius: 12, backgroundColor: PerlaColors.surfaceContainerLow, borderWidth: 1, borderColor: 'transparent' },
+  packageItemSelected: { borderColor: PerlaColors.tertiary, backgroundColor: PerlaColors.tertiary + '08' },
+  packageName: { fontFamily: 'Manrope-SemiBold', color: PerlaColors.onSurface, fontSize: 14 },
+  packageNameSelected: { color: PerlaColors.tertiary },
+  packagePrice: { fontFamily: 'Newsreader', fontSize: 18, color: PerlaColors.onSurface },
+
+  packageCounter: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  miniCounterBtn: { width: 28, height: 28, borderRadius: 6, backgroundColor: PerlaColors.surfaceContainerHighest, alignItems: 'center', justifyContent: 'center' },
+  miniCounterText: { fontSize: 14, color: PerlaColors.onSurface, fontWeight: 'bold' },
+  packageQty: { fontFamily: 'Manrope-Bold', fontSize: 15, color: PerlaColors.tertiary, minWidth: 20, textAlign: 'center' },
+
+  datePickerBtn: { backgroundColor: PerlaColors.surfaceContainerLow, borderRadius: 12, padding: 14, alignItems: 'center', borderWidth: 1, borderColor: PerlaColors.outlineVariant },
+  dateText: { fontFamily: 'Manrope-Bold', color: PerlaColors.onSurface, fontSize: 14 },
+
+  tripItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16, borderRadius: 12, backgroundColor: PerlaColors.surfaceContainerLow, marginBottom: 8, borderWidth: 1, borderColor: 'transparent' },
+  tripItemSelected: { borderColor: PerlaColors.tertiary, backgroundColor: PerlaColors.tertiary + '08' },
+  tripTime: { fontFamily: 'Newsreader-Bold', fontSize: 18, color: PerlaColors.onSurface },
+  tripBoat: { fontFamily: 'Manrope', fontSize: 12, color: PerlaColors.onSurfaceVariant },
+  tripSpots: { fontFamily: 'Manrope-Bold', fontSize: 12, color: PerlaColors.tertiary },
+  statusBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
+  statusBadgeText: { fontFamily: 'Manrope-Bold', fontSize: 9 },
+
+  textInput: { backgroundColor: PerlaColors.surfaceContainerHighest, borderRadius: 10, padding: 12, color: PerlaColors.onSurface, fontFamily: 'Manrope' },
+  ladaBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: PerlaColors.surfaceContainerHighest, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1, borderColor: PerlaColors.outlineVariant + '33' },
+  ladaBtnIso: { fontFamily: 'Manrope-Bold', fontSize: 12, color: PerlaColors.tertiary },
+  ladaBtnText: { fontFamily: 'Manrope-Bold', fontSize: 14, color: PerlaColors.onSurface },
+
+  summaryCard: { marginTop: 32, padding: 20, backgroundColor: PerlaColors.surfaceContainerLow, borderRadius: 20, borderWidth: 1, borderColor: PerlaColors.outlineVariant + '40' },
+  summaryTitle: { fontFamily: 'Newsreader-Bold', fontSize: 20, color: PerlaColors.onSurface, marginBottom: 16 },
+  summaryRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 },
+  summaryLab: { fontFamily: 'Manrope', fontSize: 14, color: PerlaColors.onSurfaceVariant },
+  summaryValSmall: { fontFamily: 'Manrope-Bold', fontSize: 14, color: PerlaColors.onSurface },
+  summaryLabTotal: { fontFamily: 'Manrope-Bold', fontSize: 18, color: PerlaColors.onSurface },
+  summaryValTotal: { fontFamily: 'Newsreader-Bold', fontSize: 26, color: PerlaColors.tertiary },
+  divider: { height: 1, backgroundColor: PerlaColors.outlineVariant + '30', marginVertical: 12 },
+  confirmBtn: { backgroundColor: PerlaColors.tertiary, padding: 18, borderRadius: 14, alignItems: 'center', marginTop: 10 },
+  confirmBtnText: { color: PerlaColors.onTertiary, fontWeight: 'bold', fontSize: 16 },
+  pagoSeguro: { textAlign: 'center', fontSize: 11, color: PerlaColors.onSurfaceVariant, marginTop: 12, fontFamily: 'Manrope' },
+
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  modalContent: { backgroundColor: PerlaColors.background, borderTopLeftRadius: 24, borderTopRightRadius: 24, height: '70%', padding: 20 },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
+  modalTitle: { fontFamily: 'Newsreader-Bold', fontSize: 22, color: PerlaColors.onSurface },
+  modalClose: { fontSize: 24, color: PerlaColors.onSurfaceVariant },
+  modalSearch: { backgroundColor: PerlaColors.surfaceContainerLow, padding: 14, borderRadius: 12, marginBottom: 16, color: PerlaColors.onSurface },
+  countryItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: PerlaColors.outlineVariant + '20' },
+  isoCodeItem: { fontFamily: 'Manrope-Bold', fontSize: 14, color: PerlaColors.tertiary, width: 35, marginRight: 10 },
+  countryName: { flex: 1, fontFamily: 'Manrope-Medium', fontSize: 16, color: PerlaColors.onSurface },
+  countryCode: { fontFamily: 'Manrope-Bold', fontSize: 16, color: PerlaColors.tertiary },
+  emptyText: { textAlign: 'center', color: PerlaColors.onSurfaceVariant, marginTop: 20, fontFamily: 'Manrope' },
 });

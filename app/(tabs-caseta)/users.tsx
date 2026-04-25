@@ -34,6 +34,13 @@ export default function UsersScreen() {
   const [saving, setSaving] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
+  // Password change modal state
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [passwordTarget, setPasswordTarget] = useState<any>(null);
+  const [newPassword, setNewPassword] = useState('');
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [changingPassword, setChangingPassword] = useState(false);
+
   const fetchUsers = useCallback(async () => {
     setLoading(true);
     try {
@@ -111,14 +118,36 @@ export default function UsersScreen() {
     }
   };
 
-  const handleResetPassword = async (email?: string) => {
-    if (!email) return toast.warning('Este usuario no tiene correo registrado en la base de talles.');
+  const openPasswordModal = (user: any) => {
+    setPasswordTarget(user);
+    setNewPassword('');
+    setShowNewPassword(false);
+    setShowPasswordModal(true);
+  };
+
+  const handleChangePassword = async () => {
+    if (!passwordTarget) return;
+    if (!newPassword || newPassword.length < 6) {
+      return toast.warning('La contraseña debe tener al menos 6 caracteres');
+    }
+    setChangingPassword(true);
     try {
-      const { error } = await supabase.auth.resetPasswordForEmail(email);
+      const { data, error } = await supabase.functions.invoke('admin-cambiar-password', {
+        body: {
+          target_user_id: passwordTarget.id_usuario,
+          new_password: newPassword,
+        }
+      });
       if (error) throw error;
-      toast.success(`Se envió el enlace de recuperación a ${email}`);
+      if (data.error) throw new Error(data.error);
+      toast.success(`Contraseña actualizada para ${passwordTarget.nombre}`);
+      setShowPasswordModal(false);
+      setPasswordTarget(null);
+      setNewPassword('');
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(e.message || 'Error al cambiar contraseña');
+    } finally {
+      setChangingPassword(false);
     }
   };
 
@@ -187,10 +216,10 @@ export default function UsersScreen() {
                 </View>
               </View>
               <View style={styles.actionsRow}>
-                {u.email && u.activo !== false && (
-                  <Pressable onPress={() => handleResetPassword(u.email)} style={styles.iconBtn}>
+                {u.activo !== false && (
+                  <Pressable onPress={() => openPasswordModal(u)} style={styles.iconBtn}>
                     <IconSymbol name="key.fill" size={16} color={PerlaColors.onSurface} />
-                    <Text style={styles.iconBtnText}>Reiniciar</Text>
+                    <Text style={styles.iconBtnText}>Contraseña</Text>
                   </Pressable>
                 )}
                 {u.activo !== false && (
@@ -411,6 +440,66 @@ export default function UsersScreen() {
               </Pressable>
               <Pressable style={styles.saveBtn} onPress={handleUpdateUser}>
                 <Text style={styles.saveBtnText}>Guardar</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Password Change Modal */}
+      <Modal visible={showPasswordModal} transparent animationType="fade">
+        <View style={styles.centerOverlay}>
+          <View style={styles.manageModal}>
+            <Text style={styles.manageTitle}>Cambiar Contraseña</Text>
+            {passwordTarget && (
+              <Text style={styles.userToManageName}>{passwordTarget.nombre}</Text>
+            )}
+
+            <Text style={styles.label}>Nueva contraseña</Text>
+            <View style={styles.passwordInputContainer}>
+              <TextInput
+                style={[styles.input, { flex: 1, borderTopRightRadius: 0, borderBottomRightRadius: 0 }]}
+                value={newPassword}
+                onChangeText={setNewPassword}
+                secureTextEntry={!showNewPassword}
+                placeholder="Mínimo 6 caracteres"
+                placeholderTextColor="#999"
+                autoComplete="new-password"
+                textContentType="newPassword"
+                editable={!changingPassword}
+              />
+              <Pressable
+                onPress={() => setShowNewPassword(!showNewPassword)}
+                style={styles.passwordToggle}
+              >
+                <IconSymbol
+                  name={showNewPassword ? "eye.slash.fill" : "eye.fill"}
+                  size={20}
+                  color={PerlaColors.onSurfaceVariant}
+                />
+              </Pressable>
+            </View>
+            {newPassword.length > 0 && newPassword.length < 6 && (
+              <Text style={styles.passwordWarning}>Mínimo 6 caracteres requeridos</Text>
+            )}
+
+            <View style={styles.modalActions}>
+              <Pressable
+                style={styles.cancelBtnManage}
+                onPress={() => { setShowPasswordModal(false); setPasswordTarget(null); }}
+                disabled={changingPassword}
+              >
+                <Text style={styles.cancelBtnTextManage}>Cancelar</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.saveBtn, changingPassword && { opacity: 0.6 }]}
+                onPress={handleChangePassword}
+                disabled={changingPassword}
+              >
+                {changingPassword
+                  ? <ActivityIndicator size="small" color="#000" />
+                  : <Text style={styles.saveBtnText}>Guardar</Text>
+                }
               </Pressable>
             </View>
           </View>

@@ -10,6 +10,7 @@ interface ClienteProfile {
   id_cliente: number;
   nombre_completo: string;
   telefono: string;
+  lada: string | null;
   es_registrado: boolean;
   push_token: string | null;
 }
@@ -91,7 +92,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // 2. Not an employee — check if registered client
       const { data: clienteData } = await supabase
         .from('cliente')
-        .select('id_cliente, nombre_completo, telefono, es_registrado, push_token')
+        .select('id_cliente, nombre_completo, telefono, lada, es_registrado, push_token')
         .eq('auth_id', user.id)
         .maybeSingle();
 
