@@ -90,7 +90,7 @@ export async function actualizarEstadoViaje(
 ) {
   const { error } = await supabase
     .from('viaje')
-    .update({ [campo]: new Date().toISOString() })
+    .update({ [campo]: new Date().toTimeString().split(' ')[0] })
     .eq('id_viaje', idViaje);
 
   if (error) throw error;

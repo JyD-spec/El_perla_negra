@@ -816,8 +816,21 @@ export type ReservacionConDetalles = Reservacion & {
   paquete: Paquete | null;
   viaje: (Viaje & { embarcacion: Embarcacion | null }) | null;
   pago: Pago[] | null;
-  detalle_reservacion: (Tables<'detalle_reservacion'> & {
+  detalle_reservacion: (Database['public']['Tables']['detalle_reservacion']['Row'] & {
     paquete: Paquete | null;
   })[] | null;
   nombre_cliente_manual?: string; // For older rows or manual entry
 };
+
+export type ViajeInsert = Database['public']['Tables']['viaje']['Insert'];
+export type ViajeConDetalles = Viaje & {
+  embarcacion: Embarcacion | null;
+};
+
+export type VistaEstadisticasDiarias = Database['public']['Views']['vista_estadisticas_diarias']['Row'];
+export type VistaKpiOperativos = Database['public']['Views']['vista_kpi_operativos']['Row'];
+export type VistaOperativaViajes = Database['public']['Views']['vista_operativa_viajes']['Row'];
+export type VistaTendenciasSemanales = Database['public']['Views']['vista_tendencias_semanales']['Row'];
+
+export type EstadoOperativoBarco = Database['public']['Enums']['estado_operativo_barco'];
+export type EstadoPase = Database['public']['Enums']['estado_pase_reservacion'];

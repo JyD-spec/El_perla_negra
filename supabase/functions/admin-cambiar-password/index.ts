@@ -1,3 +1,4 @@
+// @ts-nocheck — Este archivo se ejecuta en Deno (Supabase Edge Functions), no localmente.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.48.0";
 

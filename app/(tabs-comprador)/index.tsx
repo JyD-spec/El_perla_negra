@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'expo-router';
 import {
   StyleSheet,
@@ -21,6 +21,10 @@ import Animated, {
 } from 'react-native-reanimated';
 
 import { PerlaColors } from '@/constants/theme';
+import { supabase } from '@/src/lib/supabase';
+import { getLocalDateString } from '@/src/lib/time';
+import { obtenerDescuentos, obtenerPaquetes } from '@/src/services/catalogos.service';
+import type { Descuento, Paquete } from '@/src/lib/database.types';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const HERO_HEIGHT = 600;
@@ -35,7 +39,126 @@ export default function HomeScreen() {
   const router = useRouter();
   const scrollY = useSharedValue(0);
 
-  /* ─── Card interaction state ──────────────────────── */
+  /* ── Live data state ─────────────────────────── */
+  const [weather, setWeather] = useState({ icon: '☀️', text: 'Cargando...' });
+  const [seats, setSeats] = useState({ taken: 0, capacity: 0, label: 'Cargando...' });
+  const [paquetes, setPaquetes] = useState<Paquete[]>([]);
+  const [descuentos, setDescuentos] = useState<Descuento[]>([]);
+
+  /* ── Fetch weather (Open-Meteo, free, no key) ──────── */
+  useEffect(() => {
+    const fetchWeather = async () => {
+      try {
+        // Puerto Vallarta coordinates
+        const res = await fetch(
+          'https://api.open-meteo.com/v1/forecast?latitude=20.6534&longitude=-105.2253&current=temperature_2m,weather_code&timezone=America/Mexico_City'
+        );
+        const data = await res.json();
+        const temp = Math.round(data.current.temperature_2m);
+        const code = data.current.weather_code;
+        const wmo: Record<number, { icon: string; label: string }> = {
+          0: { icon: '☀️', label: 'Despejado' },
+          1: { icon: '🌤️', label: 'Casi despejado' },
+          2: { icon: '⛅', label: 'Parcialmente nublado' },
+          3: { icon: '☁️', label: 'Nublado' },
+          45: { icon: '🌫️', label: 'Niebla' },
+          48: { icon: '🌫️', label: 'Niebla helada' },
+          51: { icon: '🌦️', label: 'Llovizna' },
+          53: { icon: '🌦️', label: 'Llovizna' },
+          55: { icon: '🌧️', label: 'Llovizna fuerte' },
+          61: { icon: '🌧️', label: 'Lluvia ligera' },
+          63: { icon: '🌧️', label: 'Lluvia' },
+          65: { icon: '⛈️', label: 'Lluvia fuerte' },
+          80: { icon: '🌦️', label: 'Chubascos' },
+          81: { icon: '🌧️', label: 'Chubascos' },
+          82: { icon: '⛈️', label: 'Tormenta' },
+          95: { icon: '⚡', label: 'Tormenta eléctrica' },
+          96: { icon: '⚡', label: 'Granizo' },
+          99: { icon: '⚡', label: 'Granizo fuerte' },
+        };
+        const w = wmo[code] || { icon: '☀️', label: 'Soleado' };
+        setWeather({ icon: w.icon, text: `${w.label}, ${temp}°C` });
+      } catch {
+        setWeather({ icon: '☀️', text: 'Soleado, 28°C' });
+      }
+    };
+    fetchWeather();
+    const iv = setInterval(fetchWeather, 60_000);
+    return () => clearInterval(iv);
+  }, []);
+
+  /* ── Fetch next active trip seats (real-time) ──────── */
+  useEffect(() => {
+    const fetchSeats = async () => {
+      const today = getLocalDateString();
+      // Get next Programado/Abordando trip for El Perla Negra
+      const { data: trip } = await supabase
+        .from('viaje')
+        .select('id_viaje, embarcacion!inner ( nombre, capacidad_maxima )')
+        .eq('fecha_programada', today)
+        .eq('embarcacion.nombre', 'El Perla Negra')
+        .in('estado_viaje', ['Programado', 'Abordando'])
+        .order('hora_salida_programada', { ascending: true })
+        .limit(1)
+        .maybeSingle();
+
+      if (!trip) {
+        setSeats({ taken: 0, capacity: 0, label: 'Sin viajes hoy' });
+        return;
+      }
+
+      // @ts-ignore - Supabase types inner joins as arrays sometimes, or objects
+      const cap = Array.isArray(trip.embarcacion) 
+        ? trip.embarcacion[0]?.capacidad_maxima ?? 0 
+        : (trip.embarcacion as any)?.capacidad_maxima ?? 0;
+
+      const { data: reservas } = await supabase
+        .from('reservacion')
+        .select('cantidad_personas')
+        .eq('id_viaje', trip.id_viaje)
+        .neq('estado_pase', 'Rechazado');
+
+      const taken = (reservas ?? []).reduce((s, r) => s + r.cantidad_personas, 0);
+      const avail = Math.max(0, cap - taken);
+      setSeats({ taken, capacity: cap, label: `${avail} Disponibles` });
+    };
+
+    fetchSeats();
+
+    // Real-time subscription for reservation changes
+    const channel = supabase
+      .channel('home-seats')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'reservacion' }, fetchSeats)
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, []);
+
+  /* ── Fetch Catalogos (Paquetes y Descuentos) ──────── */
+  useEffect(() => {
+    const fetchCatalogos = async () => {
+      try {
+        const [paquetesData, descuentosData] = await Promise.all([
+          obtenerPaquetes(),
+          obtenerDescuentos(),
+        ]);
+        setPaquetes(paquetesData);
+        // Sort by ID desc to get newest, take top 3
+        const sortedDescuentos = [...descuentosData].sort((a, b) => b.id_descuento - a.id_descuento).slice(0, 3);
+        setDescuentos(sortedDescuentos);
+      } catch (e) {
+        console.error('Error fetching catalogos', e);
+      }
+    };
+    fetchCatalogos();
+  }, []);
+
+  /* ── Get specific packages by keyword ──────────────── */
+  const paqueteCompleto = paquetes.find(p => p.descripcion.toLowerCase().includes('comida') || p.descripcion.toLowerCase().includes('completo'));
+  const paqueteFiesta = paquetes.find(p => p.descripcion.toLowerCase().includes('bebida'));
+  const paqueteBasico = paquetes.find(p => p.descripcion.toLowerCase().includes('paseo'));
+
+  /* ── Card interaction state ──────────────────────── */
   const [basicExpanded, setBasicExpanded] = useState(false);
   const [selectedDrink, setSelectedDrink] = useState<string | null>(null);
 
@@ -122,12 +245,12 @@ export default function HomeScreen() {
             {/* Info Chips */}
             <View style={styles.chipsRow}>
               <View style={styles.chip}>
-                <Text style={styles.chipIcon}>☀️</Text>
-                <Text style={styles.chipText}>Soleado, 28°C</Text>
+                <Text style={styles.chipIcon}>{weather.icon}</Text>
+                <Text style={styles.chipText}>{weather.text}</Text>
               </View>
               <View style={styles.chip}>
                 <Text style={styles.chipIcon}>⛵</Text>
-                <Text style={styles.chipText}>Lugares: 32/50</Text>
+                <Text style={styles.chipText}>{seats.label}</Text>
               </View>
             </View>
 
@@ -149,12 +272,18 @@ export default function HomeScreen() {
           </Text>
 
           {/* ── Discount Banner ───────────────────────── */}
-          <View style={styles.discountBanner}>
-            <Text style={styles.discountIcon}>🏷️</Text>
-            <Text style={styles.discountText}>
-              ¡10% de descuento en grupos de 5 o más personas!
-            </Text>
-          </View>
+          {descuentos.length > 0 && (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.discountsScroll}>
+              {descuentos.map(d => (
+                <View key={d.id_descuento} style={[styles.discountBanner, { marginRight: 12 }]}>
+                  <Text style={styles.discountIcon}>🏷️</Text>
+                  <Text style={styles.discountText}>
+                    {d.nombre}: {d.porcentaje}% off
+                  </Text>
+                </View>
+              ))}
+            </ScrollView>
+          )}
 
           <View style={{ height: 20 }} />
 
@@ -185,7 +314,7 @@ export default function HomeScreen() {
               <View style={styles.completoFooter}>
                 <View>
                   <Text style={styles.priceLabel}>Por persona</Text>
-                  <Text style={styles.priceValue}>$450 MXN</Text>
+                  <Text style={styles.priceValue}>${paqueteCompleto ? paqueteCompleto.costo_persona : '450'} MXN</Text>
                 </View>
                 <Pressable
                   style={styles.elegirButton}
@@ -245,7 +374,7 @@ export default function HomeScreen() {
               </ScrollView>
 
               <View style={styles.fiestaFooter}>
-                <Text style={styles.packagePrice}>$350 MXN</Text>
+                <Text style={styles.packagePrice}>${paqueteFiesta ? paqueteFiesta.costo_persona : '350'} MXN</Text>
                 <Pressable
                   style={[
                     styles.elegirButton,
@@ -294,7 +423,7 @@ export default function HomeScreen() {
                 <Text style={styles.cardTitle}>🧭  Paseo Básico</Text>
                 <Text style={styles.cardDescription}>Solo paseo por la bahía</Text>
               </View>
-              <Text style={styles.packagePrice}>$250 MXN</Text>
+              <Text style={styles.packagePrice}>${paqueteBasico ? paqueteBasico.costo_persona : '250'} MXN</Text>
             </View>
 
             {/* Expand / Collapse details */}
@@ -476,6 +605,10 @@ const styles = StyleSheet.create({
     marginBottom: 32,
     maxWidth: 400,
     alignSelf: 'center',
+  },
+  discountsScroll: {
+    flexGrow: 0,
+    paddingHorizontal: 4,
   },
 
   /* ── Completo Card ─────────────────────────────────────── */

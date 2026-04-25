@@ -270,6 +270,53 @@ export async function crearReservacion(datos: {
     if (detErr) throw detErr;
   }
 
+  // 5. Send SMS if user is not registered (walk-in)
+  if (!datos.authId && datos.telefono) {
+    try {
+      // Fetch basic trip info for the SMS
+      const { data: tripData } = await supabase
+        .from('viaje')
+        .select('fecha_programada, hora_salida_programada, embarcacion(nombre)')
+        .eq('id_viaje', datos.idViaje)
+        .single();
+      
+      const embarcacion = (tripData?.embarcacion as any)?.nombre || 'El Perla Negra';
+      
+      // Ensure E.164 format for Twilio
+      let formattedPhone = datos.telefono;
+      if (!formattedPhone.startsWith('+')) {
+        const lada = datos.lada ? datos.lada.replace(/\D/g, '') : '52';
+        formattedPhone = `+${lada}${formattedPhone.replace(/\D/g, '')}`;
+      }
+
+      // Fire and forget, don't block the UI if SMS fails
+      supabase.functions.invoke('send-ticket-sms', {
+        body: {
+          telefono: formattedPhone,
+          nombre: datos.nombreCliente,
+          pin: resData.pin_verificacion,
+          embarcacion: embarcacion,
+          fecha: tripData?.fecha_programada,
+          hora: tripData?.hora_salida_programada,
+        }
+      }).then(async ({ data, error }) => {
+        if (error) {
+          console.error('Error triggering Twilio SMS:', error.message);
+          if (error instanceof Error && 'context' in error) {
+            try {
+              const contextJson = await (error as any).context.json();
+              console.error('Twilio Details:', contextJson);
+            } catch (e) {}
+          }
+        } else {
+          console.log('Twilio SMS Sent:', data);
+        }
+      });
+    } catch (e) {
+      console.error('Failed to prepare SMS:', e);
+    }
+  }
+
   return resData as Reservacion;
 }
 

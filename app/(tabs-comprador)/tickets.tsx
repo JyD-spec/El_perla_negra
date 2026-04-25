@@ -17,6 +17,7 @@ import type { ReservacionConDetalles } from '@/src/lib/database.types';
 import { FlowToggle } from '@/components/ui/FlowToggle';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { format12h } from '@/src/lib/time';
+import QRCode from 'react-native-qrcode-svg';
 
 /* ────────────────────────────────────────────────────────────
    Tickets Screen – Mis Boletos
@@ -200,19 +201,23 @@ function TicketCard({ reservacion: r }: { reservacion: ReservacionConDetalles })
         <View style={styles.ticketDividerDotRight} />
       </View>
 
-      {/* ── PIN Section (visible when Aprobado) ──── */}
+      {/* ── QR Section (visible when Aprobado) ──── */}
       {(r.estado_pase === 'Aprobado' || r.estado_pase === 'Abordado') && r.pin_verificacion && (
         <View style={styles.pinSection}>
-          <Text style={styles.pinLabel}>PIN DE ABORDAJE</Text>
-          <View style={styles.pinContainer}>
-            {r.pin_verificacion.split('').map((char, i) => (
-              <View key={i} style={styles.pinDigitBox}>
-                <Text style={styles.pinDigit}>{char}</Text>
-              </View>
-            ))}
+          <Text style={styles.pinLabel}>CÓDIGO DE ABORDAJE</Text>
+          <View style={styles.qrContainer}>
+            <QRCode
+              value={r.pin_verificacion}
+              size={160}
+              color="#000000"
+              backgroundColor="#FFFFFF"
+            />
+          </View>
+          <View style={styles.pinTextContainer}>
+            <Text style={styles.pinFallbackText}>{r.pin_verificacion}</Text>
           </View>
           <Text style={styles.pinHint}>
-            Muestra este PIN al encargado del barco para abordar
+            Muestra este código al encargado del barco para abordar
           </Text>
         </View>
       )}
@@ -457,10 +462,32 @@ const styles = StyleSheet.create({
     letterSpacing: 2,
     marginBottom: 12,
   },
-  pinContainer: {
-    flexDirection: 'row',
-    gap: 8,
+  qrContainer: {
+    padding: 20,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 24,
+    marginBottom: 16,
+    alignItems: 'center',
+    // Soft shadow for the QR card
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  pinTextContainer: {
+    backgroundColor: PerlaColors.surfaceContainerHigh,
+    paddingHorizontal: 24,
+    paddingVertical: 8,
+    borderRadius: 12,
     marginBottom: 12,
+  },
+  pinFallbackText: {
+    fontFamily: 'Newsreader-Bold',
+    fontSize: 24,
+    color: PerlaColors.onSurface,
+    letterSpacing: 8,
+    textAlign: 'center',
   },
   pinDigitBox: {
     width: 44,

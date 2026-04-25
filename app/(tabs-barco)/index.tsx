@@ -7,13 +7,18 @@ import {
   Pressable,
   ActivityIndicator,
   RefreshControl,
+  TextInput,
+  Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PerlaColors } from '@/constants/theme';
 import { useAuth } from '@/src/contexts/AuthContext';
-import { obtenerViajeActual, actualizarEstadoViaje } from '@/src/services/viajes.service';
+import { obtenerViajeActual, actualizarEstadoViaje, actualizarRegresoEstimado } from '@/src/services/viajes.service';
+import { obtenerReservacionesPorViaje } from '@/src/services/reservaciones.service';
 import type { ViajeConDetalles } from '@/src/lib/database.types';
+
 import { format12h, format12hISO } from '@/src/lib/time';
+
 
 /* ────────────────────────────────────────────────────────────
    Barco – Viaje Actual
@@ -38,11 +43,25 @@ export default function BarcoViajeScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
 
+  // ── Info de Pasajeros ──
+  const [totalPasajeros, setTotalPasajeros] = useState<number>(0);
+
+  // ── Zarpe State ──
+  const [horasRegresoText, setHorasRegresoText] = useState<string>('1.5');
+
   const fetchData = useCallback(async () => {
     if (!user) return;
     try {
       const data = await obtenerViajeActual(user.id);
       setViaje(data);
+
+      if (data) {
+        // Fetch passengers to show total
+        const res = await obtenerReservacionesPorViaje(data.id_viaje);
+        const approved = res.filter(r => r.estado_pase === 'Aprobado' || r.estado_pase === 'Abordado');
+        const count = approved.reduce((acc, curr) => acc + (curr.cantidad_personas || 0), 0);
+        setTotalPasajeros(count);
+      }
     } catch (err) { console.error(err); }
     finally { setLoading(false); setRefreshing(false); }
   }, [user]);
@@ -57,10 +76,32 @@ export default function BarcoViajeScreen() {
       await fetchData();
     } catch (err: any) {
       console.error(err);
+      Alert.alert('Error', err.message || 'Error al actualizar el viaje');
     } finally {
       setActionLoading(false);
     }
   };
+
+  const handleZarpar = async () => {
+    if (!viaje) return;
+    const horas = parseFloat(horasRegresoText);
+    if (isNaN(horas) || horas <= 0) {
+      Alert.alert('Valor inválido', 'Por favor ingresa un número de horas válido.');
+      return;
+    }
+
+    setActionLoading(true);
+    try {
+      await actualizarRegresoEstimado(viaje.id_viaje, horas);
+      await fetchData();
+    } catch (err: any) {
+      console.error(err);
+      Alert.alert('Error', err.message || 'Error al confirmar zarpe');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
 
   if (loading) {
     return (
@@ -112,18 +153,22 @@ export default function BarcoViajeScreen() {
         <DetailRow icon="📅" label="Fecha" value={viaje.fecha_programada} />
         <DetailRow icon="🕐" label="Salida Programada" value={format12h(viaje.hora_salida_programada)} />
         {viaje.hora_inicio_abordaje && (
-          <DetailRow icon="🚶" label="Inicio Abordaje" value={format12hISO(viaje.hora_inicio_abordaje)} />
+          <DetailRow icon="🚶" label="Inicio Abordaje" value={format12h(viaje.hora_inicio_abordaje)} />
         )}
         {viaje.hora_salida_real && (
-          <DetailRow icon="🚀" label="Salida Real" value={format12hISO(viaje.hora_salida_real)} />
+          <DetailRow icon="🚀" label="Salida Real" value={format12h(viaje.hora_salida_real)} />
+        )}
+        {viaje.tiempo_estimado_regreso && viaje.estado_viaje !== 'Finalizado' && (
+          <DetailRow icon="⏱️" label="Regreso Estimado" value={format12hISO(viaje.tiempo_estimado_regreso)} />
         )}
         {viaje.hora_llegada_real && (
-          <DetailRow icon="🏁" label="Llegada" value={format12hISO(viaje.hora_llegada_real)} />
+          <DetailRow icon="🏁" label="Llegada" value={format12h(viaje.hora_llegada_real)} />
         )}
         {(viaje.retraso_minutos ?? 0) > 0 && (
           <DetailRow icon="⚠️" label="Retraso" value={`${viaje.retraso_minutos} min`} warning />
         )}
       </View>
+
 
       {/* ── Action Buttons ──────────────────────── */}
       {viaje.estado_viaje === 'Programado' && (
@@ -139,16 +184,41 @@ export default function BarcoViajeScreen() {
       )}
 
       {viaje.estado_viaje === 'Abordando' && (
-        <Pressable
-          style={[styles.actionBtn, { backgroundColor: '#26A69A' }, actionLoading && { opacity: 0.6 }]}
-          onPress={() => handleAction('hora_salida_real')}
-          disabled={actionLoading}
-        >
-          {actionLoading ? <ActivityIndicator color="#fff" /> : (
-            <Text style={styles.actionBtnText}>⛵ Confirmar Zarpe</Text>
-          )}
-        </Pressable>
+        <View style={styles.pinSection}>
+          <Text style={styles.pinSectionTitle}>Control de Abordaje</Text>
+          <Text style={styles.zarpeDesc}>Verifica a los pasajeros al ingresar a la embarcación.</Text>
+          
+          <View style={styles.resContainer}>
+            <Text style={styles.resPersonas}>Total de Pasajeros Registrados:</Text>
+            <Text style={styles.resCliente}>{totalPasajeros} pasajeros</Text>
+          </View>
+
+          <View style={styles.zarpeSection}>
+            <Text style={styles.zarpeTitle}>Confirmar Zarpe</Text>
+            <Text style={styles.zarpeDesc}>Ingresa el tiempo estimado de regreso (horas):</Text>
+            
+            <TextInput
+              style={[styles.pinInput, { marginBottom: 16 }]}
+              placeholder="Ej: 1.5"
+              placeholderTextColor={PerlaColors.onSurfaceVariant + '60'}
+              value={horasRegresoText}
+              onChangeText={setHorasRegresoText}
+              keyboardType="numeric"
+            />
+
+            <Pressable
+              style={[styles.actionBtn, { backgroundColor: '#26A69A' }, actionLoading && { opacity: 0.6 }]}
+              onPress={handleZarpar}
+              disabled={actionLoading}
+            >
+              {actionLoading ? <ActivityIndicator color="#fff" /> : (
+                <Text style={styles.actionBtnText}>⛵ Zarpar {horasRegresoText ? `(Regreso en ${horasRegresoText} hr)` : ''}</Text>
+              )}
+            </Pressable>
+          </View>
+        </View>
       )}
+
 
       {viaje.estado_viaje === 'En_Navegacion' && (
         <Pressable
@@ -219,9 +289,40 @@ const styles = StyleSheet.create({
   },
   actionBtnText: { fontFamily: 'Manrope-Bold', fontSize: 17, color: '#fff' },
 
+  pinSection: {
+    backgroundColor: PerlaColors.surfaceContainerLow,
+    borderRadius: 16, padding: 18, marginBottom: 20, borderWidth: 1, borderColor: PerlaColors.outlineVariant + '30'
+  },
+  pinSectionTitle: { fontFamily: 'Newsreader', fontSize: 22, color: PerlaColors.onSurface, marginBottom: 12 },
+  pinInputRow: { flexDirection: 'row', gap: 12, marginBottom: 16 },
+  pinInput: {
+    flex: 1, backgroundColor: PerlaColors.surfaceContainer, borderRadius: 12,
+    paddingHorizontal: 16, color: PerlaColors.onSurface, fontFamily: 'Manrope-Bold', fontSize: 16,
+    borderWidth: 1, borderColor: PerlaColors.outlineVariant + '40'
+  },
+  verificarBtn: {
+    backgroundColor: PerlaColors.tertiary, borderRadius: 12, paddingHorizontal: 20, justifyContent: 'center'
+  },
+  verificarBtnText: { fontFamily: 'Manrope-Bold', color: PerlaColors.onTertiary, fontSize: 15 },
+  resContainer: {
+    backgroundColor: PerlaColors.surfaceContainerHigh, borderRadius: 12, padding: 16,
+    borderLeftWidth: 4, borderLeftColor: PerlaColors.tertiary
+  },
+  resCliente: { fontFamily: 'Manrope-Bold', fontSize: 22, color: PerlaColors.onSurface, marginTop: 4 },
+  resPersonas: { fontFamily: 'Manrope', fontSize: 15, color: PerlaColors.onSurfaceVariant },
+
   finishedBanner: {
     backgroundColor: '#66BB6A22', borderRadius: 14, paddingVertical: 18, alignItems: 'center',
     borderWidth: 1, borderColor: '#66BB6A40',
   },
   finishedText: { fontFamily: 'Manrope-Bold', fontSize: 16, color: '#66BB6A' },
+
+  zarpeSection: {
+    marginTop: 24,
+    borderTopWidth: 1,
+    borderTopColor: PerlaColors.outlineVariant + '30',
+    paddingTop: 16,
+  },
+  zarpeTitle: { fontFamily: 'Newsreader-Bold', fontSize: 18, color: PerlaColors.onSurface, marginBottom: 4 },
+  zarpeDesc: { fontFamily: 'Manrope', fontSize: 14, color: PerlaColors.onSurfaceVariant, marginBottom: 12 },
 });
