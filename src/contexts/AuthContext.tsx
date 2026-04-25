@@ -25,7 +25,7 @@ interface AuthState {
 
 interface AuthContextValue extends AuthState {
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
-  signUp: (email: string, password: string, nombre: string, telefono: string) => Promise<{ error: string | null }>;
+  signUp: (email: string, password: string, nombre: string, telefono: string, lada: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
 }
@@ -211,6 +211,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     password: string,
     nombre: string,
     telefono: string,
+    lada: string,
   ) => {
     setState(prev => ({ ...prev, loading: true }));
 
@@ -222,6 +223,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         data: {
           nombre: nombre,
           telefono: telefono,
+          lada: lada,
         }
       }
     });

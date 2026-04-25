@@ -25,7 +25,7 @@ import { obtenerViajesDelDia, obtenerCupoViaje } from '@/src/services/viajes.ser
 import { crearReservacion } from '@/src/services/reservaciones.service';
 import type { Paquete, Viaje } from '@/src/lib/database.types';
 import { FlowToggle } from '@/components/ui/FlowToggle';
-import { format12h } from '@/src/lib/time';
+import { format12h, getLocalDateString } from '@/src/lib/time';
 
 /* ────────────────────────────────────────────────────────────
    Types
@@ -111,7 +111,7 @@ export default function ReservarScreen() {
   /* ─── Fetch Trips when Date changes ────────────────────── */
   useEffect(() => {
     (async () => {
-      const formatted = date.toISOString().split('T')[0];
+      const formatted = getLocalDateString(date);
       try {
         const viajesData = await obtenerViajesDelDia(formatted);
         setViajes(viajesData as ViajeConEmb[]);

@@ -21,7 +21,7 @@ import { PerlaColors } from '@/constants/theme';
 import { useToast } from '@/src/contexts/ToastContext';
 import type { Descuento, EstadoViaje, Paquete, Viaje } from '@/src/lib/database.types';
 import { supabase } from '@/src/lib/supabase';
-import { format12h } from '@/src/lib/time';
+import { format12h, getLocalDateString } from '@/src/lib/time';
 import { obtenerDescuentos } from '@/src/services/catalogos.service';
 import { registrarPago } from '@/src/services/pagos.service';
 import { crearReservacion } from '@/src/services/reservaciones.service';
@@ -151,7 +151,7 @@ export default function CasetaNewReservationScreen() {
   const [selectedViaje, setSelectedViaje] = useState<ViajeConEmb | null>(null);
   useEffect(() => {
     (async () => {
-      const formatted = date.toISOString().split('T')[0];
+      const formatted = getLocalDateString(date);
       try {
         const viajesData = await obtenerViajesDelDia(formatted);
         setViajes(viajesData as ViajeConEmb[]);

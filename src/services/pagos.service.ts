@@ -1,6 +1,7 @@
 // src/services/pagos.service.ts
 import { supabase } from '@/src/lib/supabase';
 import type { Pago, PagoInsert } from '@/src/lib/database.types';
+import { getLocalDateString } from '@/src/lib/time';
 
 /**
  * Registrar un pago.
@@ -37,7 +38,7 @@ export async function obtenerPagos(idReservacion: number) {
  * Obtener resumen de pagos de un día (Caseta — para reportes).
  */
 export async function resumenPagosDelDia(fecha?: string) {
-  const hoy = fecha ?? new Date().toISOString().split('T')[0];
+  const hoy = fecha ?? getLocalDateString();
 
   const { data, error } = await supabase
     .from('pago')

@@ -181,7 +181,7 @@ export default function CasetaTripsScreen() {
       const matchText = !searchText || 
         v.embarcacion.nombre.toLowerCase().includes(lowerSearch) ||
         formatDBTime(v.hora_salida_programada).toLowerCase().includes(lowerSearch) ||
-        (v.tripulacion_asignada || []).some(id => 
+        (v.tripulacion_asignada || []).some((id: string) => 
           encargados.find(e => e.id_usuario === id)?.nombre.toLowerCase().includes(lowerSearch)
         );
 

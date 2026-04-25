@@ -19,3 +19,12 @@ export const format12hISO = (isoStr?: string | null) => {
   const d = new Date(isoStr);
   return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
 };
+
+/**
+ * Retorna la fecha local en formato YYYY-MM-DD
+ */
+export const getLocalDateString = (d: Date = new Date()) => {
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000)
+    .toISOString()
+    .split("T")[0];
+};

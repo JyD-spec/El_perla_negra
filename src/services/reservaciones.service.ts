@@ -6,6 +6,7 @@ import type {
   ReservacionConDetalles,
   Cliente,
 } from '@/src/lib/database.types';
+import { getLocalDateString } from '@/src/lib/time';
 
 /* ── Queries ────────────────────────────────────────────── */
 
@@ -69,7 +70,7 @@ export async function obtenerReservacionesPorViaje(idViaje: number) {
  * Obtener todas las reservaciones del día (Caseta).
  */
 export async function obtenerReservacionesDelDia(fecha?: string) {
-  const hoy = fecha ?? new Date().toISOString().split('T')[0];
+  const hoy = fecha ?? getLocalDateString();
 
   const { data, error } = await supabase
     .from('reservacion')
@@ -115,7 +116,7 @@ export async function obtenerMisVentas(fecha?: string) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('No autenticado');
 
-  const hoy = fecha ?? new Date().toISOString().split('T')[0];
+  const hoy = fecha ?? getLocalDateString();
 
   const { data, error } = await supabase
     .from('reservacion')

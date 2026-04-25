@@ -45,7 +45,7 @@ Deno.serve(async (req) => {
   const { data: viajesPendientes } = await supabase
     .from('Viaje')
     .select('id_viaje, estado_viaje, id_embarcacion')
-    .eq('fecha_programada', new Date().toISOString().split('T')[0])
+    .eq('fecha_programada', new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Hermosillo' }).format(new Date()))
     .in('estado_viaje', ['Programado', 'Retrasado']);
 
   if (!viajesPendientes || viajesPendientes.length === 0) {
