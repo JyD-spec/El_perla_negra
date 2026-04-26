@@ -7,6 +7,10 @@ import {
   obtenerCupoViaje,
   obtenerViajesDelDia,
   programarViaje,
+  actualizarEstadoViaje,
+  enviarAlertaPasajeros,
+  actualizarRegresoEstimado,
+  notificarRezagados,
 } from "@/src/services/viajes.service";
 import DateTimePicker, {
   DateTimePickerEvent,
@@ -20,6 +24,7 @@ import {
 } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Modal,
   Platform,
   Pressable,
@@ -87,6 +92,74 @@ export default function CasetaTripsScreen() {
   const [filterEstado, setFilterEstado] = useState<string | null>(null);
   const [embarcaciones, setEmbarcaciones] = useState<Embarcacion[]>([]);
   const [encargados, setEncargados] = useState<any[]>([]);
+
+  // Trip lifecycle action state
+  const [tripActionLoading, setTripActionLoading] = useState<number | null>(null);
+  const [tripAlertLoading, setTripAlertLoading] = useState<number | null>(null);
+
+  /* ── Trip Lifecycle Handlers ──────────────────── */
+  const handleIniciarAbordaje = async (idViaje: number) => {
+    setTripActionLoading(idViaje);
+    try {
+      await actualizarEstadoViaje(idViaje, 'hora_inicio_abordaje');
+      try {
+        await enviarAlertaPasajeros(idViaje, '🚶 ¡El abordaje ha comenzado! Por favor dirígete a la embarcación.');
+      } catch (e) { console.error('Error enviando alerta de abordaje:', e); }
+      await fetchData();
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'Error al iniciar abordaje');
+    } finally {
+      setTripActionLoading(null);
+    }
+  };
+
+  const handleAviso5Min = async (idViaje: number) => {
+    setTripAlertLoading(idViaje);
+    try {
+      await enviarAlertaPasajeros(idViaje, '⚠️ El barco zarpará en 5 minutos. Por favor aborda de inmediato.');
+      Alert.alert('Aviso Enviado', 'Se ha notificado a todos los pasajeros.');
+    } catch (err: any) {
+      Alert.alert('Error', 'No se pudo enviar el aviso: ' + err.message);
+    } finally {
+      setTripAlertLoading(null);
+    }
+  };
+
+  const handleZarparCaseta = async (idViaje: number) => {
+    setTripActionLoading(idViaje);
+    try {
+      await actualizarRegresoEstimado(idViaje, 1.5);
+
+      try {
+        await enviarAlertaPasajeros(idViaje, '⛵ ¡El barco ha zarpado!');
+      } catch (e) { console.error('Error enviando alerta de zarpe:', e); }
+
+      // Esperar al trigger DB para marcar rezagados, luego notificar
+      setTimeout(async () => {
+        try {
+          await notificarRezagados(idViaje);
+        } catch (e) { console.error('Error notificando rezagados:', e); }
+      }, 1500);
+
+      await fetchData();
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'Error al confirmar zarpe');
+    } finally {
+      setTripActionLoading(null);
+    }
+  };
+
+  const handleConfirmarLlegada = async (idViaje: number) => {
+    setTripActionLoading(idViaje);
+    try {
+      await actualizarEstadoViaje(idViaje, 'hora_llegada_real');
+      await fetchData();
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'Error al confirmar llegada');
+    } finally {
+      setTripActionLoading(null);
+    }
+  };
 
   const fetchData = useCallback(async () => {
     try {
@@ -567,6 +640,57 @@ export default function CasetaTripsScreen() {
                 </Text>
               )}
 
+              {/* ── Trip Lifecycle Actions ──────────── */}
+              {(dynStatus === 'Programado' || dynStatus === 'Retrasado') && (
+                <View style={styles.tripActionsRow}>
+                  <Pressable
+                    style={[styles.tripActionBtn, { backgroundColor: '#AB47BC' }, tripActionLoading === v.id_viaje && { opacity: 0.6 }]}
+                    onPress={() => handleIniciarAbordaje(v.id_viaje)}
+                    disabled={tripActionLoading === v.id_viaje}
+                  >
+                    {tripActionLoading === v.id_viaje ? <ActivityIndicator size="small" color="#fff" /> : (
+                      <Text style={styles.tripActionBtnText}>🚶 Abordaje</Text>
+                    )}
+                  </Pressable>
+                </View>
+              )}
+
+              {dynStatus === 'Abordando' && (
+                <View style={styles.tripActionsRow}>
+                  <Pressable
+                    style={[styles.tripActionBtn, { backgroundColor: PerlaColors.surfaceContainerHigh, borderWidth: 1, borderColor: PerlaColors.tertiary + '50' }, tripAlertLoading === v.id_viaje && { opacity: 0.6 }]}
+                    onPress={() => handleAviso5Min(v.id_viaje)}
+                    disabled={tripAlertLoading === v.id_viaje}
+                  >
+                    {tripAlertLoading === v.id_viaje ? <ActivityIndicator size="small" color={PerlaColors.onSurface} /> : (
+                      <Text style={[styles.tripActionBtnText, { color: PerlaColors.onSurface }]}>📢 5 Min</Text>
+                    )}
+                  </Pressable>
+                  <Pressable
+                    style={[styles.tripActionBtn, { backgroundColor: '#26A69A', flex: 1 }, tripActionLoading === v.id_viaje && { opacity: 0.6 }]}
+                    onPress={() => handleZarparCaseta(v.id_viaje)}
+                    disabled={tripActionLoading === v.id_viaje}
+                  >
+                    {tripActionLoading === v.id_viaje ? <ActivityIndicator size="small" color="#fff" /> : (
+                      <Text style={styles.tripActionBtnText}>⛵ Zarpar</Text>
+                    )}
+                  </Pressable>
+                </View>
+              )}
+
+              {dynStatus === 'En_Navegacion' && (
+                <View style={styles.tripActionsRow}>
+                  <Pressable
+                    style={[styles.tripActionBtn, { backgroundColor: '#66BB6A', flex: 1 }, tripActionLoading === v.id_viaje && { opacity: 0.6 }]}
+                    onPress={() => handleConfirmarLlegada(v.id_viaje)}
+                    disabled={tripActionLoading === v.id_viaje}
+                  >
+                    {tripActionLoading === v.id_viaje ? <ActivityIndicator size="small" color="#fff" /> : (
+                      <Text style={styles.tripActionBtnText}>🏁 Confirmar Llegada</Text>
+                    )}
+                  </Pressable>
+                </View>
+              )}
 
             </Pressable>
           );
@@ -1164,6 +1288,28 @@ const styles = StyleSheet.create({
     color: "#FFA726",
     marginTop: 8,
   },
+
+  tripActionsRow: {
+    flexDirection: "row",
+    gap: 8,
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: PerlaColors.outlineVariant + "15",
+  },
+  tripActionBtn: {
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+  },
+  tripActionBtnText: {
+    fontFamily: "Manrope-Bold",
+    fontSize: 13,
+    color: "#fff",
+  },
+
   climaText: {
     fontFamily: "Manrope",
     fontSize: 12,

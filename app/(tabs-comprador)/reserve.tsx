@@ -550,8 +550,8 @@ const styles = StyleSheet.create({
   summaryLabTotal: { fontFamily: 'Manrope-Bold', fontSize: 18, color: PerlaColors.onSurface },
   summaryValTotal: { fontFamily: 'Newsreader-Bold', fontSize: 26, color: PerlaColors.tertiary },
   divider: { height: 1, backgroundColor: PerlaColors.outlineVariant + '30', marginVertical: 12 },
-  confirmBtn: { backgroundColor: PerlaColors.tertiary, padding: 18, borderRadius: 14, alignItems: 'center', marginTop: 10 },
-  confirmBtnText: { color: PerlaColors.onTertiary, fontWeight: 'bold', fontSize: 16 },
+  confirmBtn: { backgroundColor: PerlaColors.tertiary, paddingVertical: 18, paddingHorizontal: 16, borderRadius: 14, alignItems: 'center', justifyContent: 'center', marginTop: 10 },
+  confirmBtnText: { color: PerlaColors.onTertiary, fontFamily: 'Manrope-Bold', fontSize: 15, textAlign: 'center' },
   pagoSeguro: { textAlign: 'center', fontSize: 11, color: PerlaColors.onSurfaceVariant, marginTop: 12, fontFamily: 'Manrope' },
 
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },

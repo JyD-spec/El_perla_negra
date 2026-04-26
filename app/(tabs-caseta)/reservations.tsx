@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   StyleSheet,
   View,
@@ -11,20 +11,24 @@ import {
   Alert,
   Platform,
   Modal,
+  FlatList,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { PerlaColors } from '@/constants/theme';
 import { globalEvents } from '@/src/lib/events';
+import { useToast } from '@/src/contexts/ToastContext';
 import {
   obtenerReservacionesDelDia,
   aprobarPase,
   rechazarPase,
   verificarPIN,
+  reubicarReservacion,
 } from '@/src/services/reservaciones.service';
-import type { ReservacionConDetalles, EstadoPase } from '@/src/lib/database.types';
+import { obtenerViajesDelDia, obtenerCupoViaje } from '@/src/services/viajes.service';
+import type { ReservacionConDetalles, EstadoPase, Viaje } from '@/src/lib/database.types';
 import { supabase } from '@/src/lib/supabase';
-import { format12h } from '@/src/lib/time';
+import { format12h, getLocalDateString } from '@/src/lib/time';
 
 /* ────────────────────────────────────────────────────────────
    Caseta – Reservaciones
@@ -34,20 +38,27 @@ import { format12h } from '@/src/lib/time';
 type Filtro = 'Todos' | 'Pendiente_Caseta' | 'Aprobado' | 'Vencido' | 'Abordado';
 
 const FILTROS: { key: Filtro; label: string; icon: string }[] = [
-  { key: 'Todos',            label: 'Todos',      icon: '📋' },
+  { key: 'Todos', label: 'Todos', icon: '📋' },
   { key: 'Pendiente_Caseta', label: 'Pendientes', icon: '⏳' },
-  { key: 'Aprobado',         label: 'Aprobados',  icon: '✅' },
-  { key: 'Vencido',          label: 'Vencidos',    icon: '⚠️' },
-  { key: 'Abordado',         label: 'Abordados',   icon: '🏴‍☠️' },
+  { key: 'Aprobado', label: 'Aprobados', icon: '✅' },
+  { key: 'Vencido', label: 'Vencidos', icon: '⚠️' },
+  { key: 'Abordado', label: 'Abordados', icon: '🏴‍☠️' },
 ];
 
+const createStatusStyle = (hexColor: string) => ({
+  bg: `${hexColor}22`,
+  text: hexColor,
+});
+
 const ESTADO_STYLE: Record<string, { bg: string; text: string }> = {
-  Pendiente_Caseta: { bg: '#FFA726' + '22', text: '#FFA726' },
-  Aprobado:         { bg: '#66BB6A' + '22', text: '#66BB6A' },
-  Rechazado:        { bg: '#EF5350' + '22', text: '#EF5350' },
-  Abordado:         { bg: PerlaColors.tertiary + '22', text: PerlaColors.tertiary },
-  Vencido:          { bg: '#78909C' + '22', text: '#78909C' },
+  Pendiente_Caseta: createStatusStyle('#F59E0B'),
+  Aprobado: createStatusStyle('#10B981'),
+  Rechazado: createStatusStyle('#EF4444'),
+  Abordado: createStatusStyle(PerlaColors.tertiary),
+  Vencido: createStatusStyle('#64748B'),
 };
+
+type ViajeConEmb = Viaje & { embarcacion: { nombre: string; capacidad_maxima: number } };
 
 export default function CasetaReservationsScreen() {
   const insets = useSafeAreaInsets();
@@ -64,7 +75,23 @@ export default function CasetaReservationsScreen() {
     title: string;
     message: string;
     onConfirm: () => void;
-  }>({ visible: false, title: '', message: '', onConfirm: () => {} });
+  }>({ visible: false, title: '', message: '', onConfirm: () => { } });
+
+  /* ── Reubicar state ──────────────────────────────── */
+  const [reubicarModal, setReubicarModal] = useState<{
+    visible: boolean;
+    reservacion: ReservacionConDetalles | null;
+  }>({ visible: false, reservacion: null });
+  const [reubicarViajes, setReubicarViajes] = useState<ViajeConEmb[]>([]);
+  const [reubicarCupos, setReubicarCupos] = useState<Record<number, number>>({});
+  const [reubicarLoading, setReubicarLoading] = useState(false);
+  const [reubicarSaving, setReubicarSaving] = useState(false);
+  const [reubicarSuccess, setReubicarSuccess] = useState<{
+    visible: boolean;
+    tripTime?: string;
+    boatName?: string;
+  }>({ visible: false });
+  const toast = useToast();
 
   const fetchData = useCallback(async () => {
     try {
@@ -78,9 +105,9 @@ export default function CasetaReservationsScreen() {
     }
   }, []);
 
-  useEffect(() => { 
-    fetchData(); 
-    
+  useEffect(() => {
+    fetchData();
+
     // Subscribe to real-time updates for reservations
     const channel = supabase
       .channel('reservacion-all')
@@ -113,7 +140,14 @@ export default function CasetaReservationsScreen() {
   }, [fetchData]);
 
   /* ── Filtered list ──────────────────────────────── */
-  const filtered = reservaciones.filter(r => {
+  // Exclude Vencido originals that were already relocated
+  // (es_reubicacion=true on the original means it spawned a new reservation)
+  const activeReservaciones = reservaciones.filter(r => {
+    if (r.estado_pase === 'Vencido' && r.es_reubicacion && !r.reservacion_original_id) return false;
+    return true;
+  });
+
+  const filtered = activeReservaciones.filter(r => {
     if (filtro !== 'Todos' && r.estado_pase !== filtro) return false;
     if (busqueda) {
       const q = busqueda.toUpperCase();
@@ -159,6 +193,67 @@ export default function CasetaReservationsScreen() {
     });
   };
 
+  /* ── Reubicar ───────────────────────────────────── */
+  const openReubicar = async (r: ReservacionConDetalles) => {
+    setReubicarModal({ visible: true, reservacion: r });
+    setReubicarLoading(true);
+    try {
+      const hoy = getLocalDateString();
+      const viajesData = await obtenerViajesDelDia(hoy);
+      // Filter out the current trip and non-reservable trips
+      const currentViajeId = (r.viaje as any)?.id_viaje ?? r.id_viaje;
+      const available = (viajesData as ViajeConEmb[]).filter(
+        v => v.id_viaje !== currentViajeId &&
+             v.estado_viaje !== 'Finalizado' &&
+             v.estado_viaje !== 'Cancelado'
+      );
+      setReubicarViajes(available);
+
+      const cupoResults = await Promise.all(
+        available.map(v =>
+          obtenerCupoViaje(v.id_viaje).then(c => ({ id: v.id_viaje, cupo: c }))
+        )
+      );
+      const m: Record<number, number> = {};
+      cupoResults.forEach(c => { m[c.id] = c.cupo; });
+      setReubicarCupos(m);
+    } catch (err) {
+      console.error('Error fetching trips for reubicar:', err);
+    } finally {
+      setReubicarLoading(false);
+    }
+  };
+
+  const handleReubicar = async (idViajeNuevo: number) => {
+    if (!reubicarModal.reservacion) return;
+    setReubicarSaving(true);
+    try {
+      await reubicarReservacion(reubicarModal.reservacion.id_reservacion, idViajeNuevo);
+
+      // Find the selected trip details for the success message
+      const selectedTrip = reubicarViajes.find(v => v.id_viaje === idViajeNuevo);
+
+      // Show success state inside the modal
+      setReubicarSaving(false);
+      setReubicarSuccess({
+        visible: true,
+        tripTime: selectedTrip ? format12h(selectedTrip.hora_salida_programada) : undefined,
+        boatName: selectedTrip?.embarcacion?.nombre,
+      });
+
+      // Auto-dismiss after 1.8s
+      setTimeout(async () => {
+        setReubicarSuccess({ visible: false });
+        setReubicarModal({ visible: false, reservacion: null });
+        await fetchData();
+      }, 1800);
+    } catch (err: any) {
+      toast.error(err.message || 'Error al reubicar la reservación.');
+    } finally {
+      setReubicarSaving(false);
+    }
+  };
+
   if (loading) {
     return (
       <View style={[styles.root, styles.centered]}>
@@ -202,8 +297,8 @@ export default function CasetaReservationsScreen() {
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterRow}>
         {FILTROS.map(f => {
           const count = f.key === 'Todos'
-            ? reservaciones.length
-            : reservaciones.filter(r => r.estado_pase === f.key).length;
+            ? activeReservaciones.length
+            : activeReservaciones.filter(r => r.estado_pase === f.key).length;
           const isActive = filtro === f.key;
           return (
             <Pressable
@@ -298,7 +393,10 @@ export default function CasetaReservationsScreen() {
 
             {/* Vencido — reubicar */}
             {r.estado_pase === 'Vencido' && (
-              <Pressable style={[styles.actionBtn, styles.reubicarBtn]}>
+              <Pressable
+                style={[styles.actionBtn, styles.reubicarBtn]}
+                onPress={() => openReubicar(r)}
+              >
                 <Text style={styles.reubicarText}>🔄 Reubicar en otro viaje</Text>
               </Pressable>
             )}
@@ -312,19 +410,207 @@ export default function CasetaReservationsScreen() {
             <Text style={styles.modalTitle}>{confirmModal.title}</Text>
             <Text style={styles.modalMessage}>{confirmModal.message}</Text>
             <View style={styles.modalActions}>
-              <Pressable 
-                style={styles.modalCancelBtn} 
+              <Pressable
+                style={styles.modalCancelBtn}
                 onPress={() => setConfirmModal(prev => ({ ...prev, visible: false }))}
               >
                 <Text style={styles.modalCancelText}>Cancelar</Text>
               </Pressable>
-              <Pressable 
-                style={styles.modalConfirmBtn} 
+              <Pressable
+                style={styles.modalConfirmBtn}
                 onPress={confirmModal.onConfirm}
               >
                 <Text style={styles.modalConfirmText}>Confirmar</Text>
               </Pressable>
             </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ── Reubicar Modal ─────────────────────────── */}
+      <Modal visible={reubicarModal.visible} transparent animationType="slide">
+        <View style={styles.reubicarOverlay}>
+          <View style={styles.reubicarSheet}>
+            {/* Drag handle */}
+            <View style={styles.reubicarDragHandle} />
+
+            {/* Header */}
+            <View style={styles.reubicarHeader}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.reubicarTitle}>🔄 Reubicar Reservación</Text>
+                <Text style={styles.reubicarHeaderHint}>Selecciona el nuevo viaje para este pasajero</Text>
+              </View>
+              <Pressable
+                style={styles.reubicarCloseCircle}
+                onPress={() => setReubicarModal({ visible: false, reservacion: null })}
+              >
+                <Text style={styles.reubicarCloseX}>✕</Text>
+              </Pressable>
+            </View>
+
+            {/* Reservation summary card */}
+            {reubicarModal.reservacion && (
+              <View style={styles.reubicarSummaryCard}>
+                <View style={styles.reubicarSummaryRow}>
+                  <Text style={styles.reubicarSummaryIcon}>👤</Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.reubicarSummaryName}>
+                      {reubicarModal.reservacion.cliente?.nombre_completo ?? 'Cliente'}
+                    </Text>
+                    <Text style={styles.reubicarSummaryMeta}>
+                      {reubicarModal.reservacion.cantidad_personas} persona{reubicarModal.reservacion.cantidad_personas !== 1 ? 's' : ''}
+                      {' · '}
+                      {reubicarModal.reservacion.paquete?.descripcion ?? 'Paquete'}
+                      {' · '}
+                      🕒 {format12h((reubicarModal.reservacion.viaje as any)?.hora_salida_programada)}
+                    </Text>
+                  </View>
+                  <Text style={styles.reubicarSummaryAmount}>
+                    ${reubicarModal.reservacion.total_pagar?.toFixed(0)}
+                  </Text>
+                </View>
+              </View>
+            )}
+
+            {/* Section label */}
+            <Text style={styles.reubicarSectionLabel}>Viajes disponibles hoy</Text>
+
+            {/* Content */}
+            {reubicarLoading ? (
+              <View style={[styles.centered, { flex: 1 }]}>
+                <ActivityIndicator size="large" color={PerlaColors.tertiary} />
+                <Text style={styles.reubicarLoadingText}>Buscando viajes...</Text>
+              </View>
+            ) : reubicarViajes.length === 0 ? (
+              <View style={[styles.centered, { flex: 1, paddingHorizontal: 32 }]}>
+                <Text style={styles.reubicarEmptyIcon}>⛵</Text>
+                <Text style={styles.reubicarEmptyTitle}>Sin viajes disponibles</Text>
+                <Text style={styles.reubicarEmptyText}>No hay viajes activos para reubicar hoy. Intenta mañana.</Text>
+              </View>
+            ) : (
+              <FlatList
+                data={reubicarViajes}
+                keyExtractor={v => String(v.id_viaje)}
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={{ paddingBottom: 24 }}
+                renderItem={({ item: v }) => {
+                  const cap = v.embarcacion.capacidad_maxima;
+                  const occupied = reubicarCupos[v.id_viaje] ?? 0;
+                  const disp = cap - occupied;
+                  const fillRatio = cap > 0 ? occupied / cap : 0;
+                  const isFull = disp <= 0;
+                  const needsSpace = reubicarModal.reservacion
+                    ? disp < reubicarModal.reservacion.cantidad_personas
+                    : false;
+                  const isDisabled = isFull || needsSpace || reubicarSaving;
+
+                  return (
+                    <Pressable
+                      style={({ pressed }) => [
+                        styles.reubicarTripCard,
+                        isDisabled && styles.reubicarTripCardDisabled,
+                        !isDisabled && pressed && styles.reubicarTripCardPressed,
+                      ]}
+                      disabled={isDisabled}
+                      onPress={() => handleReubicar(v.id_viaje)}
+                    >
+                      {/* Gold accent bar for available trips */}
+                      {!isDisabled && <View style={styles.reubicarTripAccent} />}
+
+                      <View style={styles.reubicarTripBody}>
+                        {/* Top row: time + status + spots */}
+                        <View style={styles.reubicarTripTopRow}>
+                          <Text style={styles.reubicarTripTime}>{format12h(v.hora_salida_programada)}</Text>
+                          <View style={[
+                            styles.reubicarTripStatusBadge,
+                            { backgroundColor: v.estado_viaje === 'Abordando' ? '#c084fc22' : '#34d39922' },
+                          ]}>
+                            <Text style={[
+                              styles.reubicarTripStatusText,
+                              { color: v.estado_viaje === 'Abordando' ? '#c084fc' : '#34d399' },
+                            ]}>
+                              {v.estado_viaje === 'Abordando' ? 'ACTIVO' : v.estado_viaje?.toUpperCase()}
+                            </Text>
+                          </View>
+                          <View style={{ flex: 1 }} />
+                          <Text style={[
+                            styles.reubicarTripSpotsText,
+                            isFull && { color: '#EF5350' },
+                          ]}>
+                            {isFull ? 'Agotado' : `${disp} disp.`}
+                          </Text>
+                        </View>
+
+                        {/* Boat name */}
+                        <Text style={styles.reubicarTripBoat}>⛵ {v.embarcacion.nombre}</Text>
+
+                        {/* Capacity bar */}
+                        <View style={styles.reubicarCapBarBg}>
+                          <View style={[
+                            styles.reubicarCapBarFill,
+                            {
+                              width: `${Math.min(fillRatio * 100, 100)}%`,
+                              backgroundColor: fillRatio > 0.85 ? '#EF5350' : fillRatio > 0.6 ? '#FFA726' : PerlaColors.tertiary,
+                            },
+                          ]} />
+                        </View>
+                        <Text style={styles.reubicarCapLabel}>{occupied}/{cap} ocupados</Text>
+
+                        {/* Warning */}
+                        {needsSpace && !isFull && (
+                          <Text style={styles.reubicarTripWarn}>⚠️ Espacio insuficiente para {reubicarModal.reservacion?.cantidad_personas} personas</Text>
+                        )}
+                      </View>
+                    </Pressable>
+                  );
+                }}
+              />
+            )}
+
+            {/* Cancel footer button */}
+            <Pressable
+              style={styles.reubicarCancelBtn}
+              onPress={() => setReubicarModal({ visible: false, reservacion: null })}
+            >
+              <Text style={styles.reubicarCancelText}>Cancelar</Text>
+            </Pressable>
+
+            {/* Saving overlay */}
+            {reubicarSaving && (
+              <View style={styles.reubicarSavingOverlay}>
+                <View style={styles.reubicarSavingContent}>
+                  <ActivityIndicator size="large" color={PerlaColors.tertiary} />
+                  <Text style={styles.reubicarSavingText}>Reubicando reservación...</Text>
+                </View>
+              </View>
+            )}
+
+            {/* Success overlay */}
+            {reubicarSuccess.visible && (
+              <View style={styles.reubicarSuccessOverlay}>
+                <View style={styles.reubicarSuccessContent}>
+                  <View style={styles.reubicarSuccessCircle}>
+                    <Text style={styles.reubicarSuccessCheck}>✓</Text>
+                  </View>
+                  <Text style={styles.reubicarSuccessTitle}>¡Reubicación exitosa!</Text>
+                  <Text style={styles.reubicarSuccessSubtitle}>
+                    Nuevo viaje asignado
+                  </Text>
+                  {reubicarSuccess.tripTime && (
+                    <View style={styles.reubicarSuccessDetail}>
+                      <Text style={styles.reubicarSuccessTime}>
+                        🕒 {reubicarSuccess.tripTime}
+                      </Text>
+                      {reubicarSuccess.boatName && (
+                        <Text style={styles.reubicarSuccessBoat}>
+                          ⛵ {reubicarSuccess.boatName}
+                        </Text>
+                      )}
+                    </View>
+                  )}
+                </View>
+              </View>
+            )}
           </View>
         </View>
       </Modal>
@@ -506,5 +792,309 @@ const styles = StyleSheet.create({
     fontFamily: 'Manrope-Bold',
     fontSize: 13,
     color: '#42A5F5',
+  },
+
+  /* Reubicar Modal — Premium Design */
+  reubicarOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    justifyContent: 'flex-end',
+  },
+  reubicarSheet: {
+    backgroundColor: PerlaColors.background,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    height: '82%',
+    paddingHorizontal: 20,
+    paddingBottom: 16,
+    borderTopWidth: 1,
+    borderTopColor: PerlaColors.outlineVariant + '30',
+  },
+  reubicarDragHandle: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: PerlaColors.outlineVariant + '60',
+    alignSelf: 'center',
+    marginTop: 12,
+    marginBottom: 16,
+  },
+  reubicarHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: 16,
+  },
+  reubicarTitle: {
+    fontFamily: 'Newsreader-Bold',
+    fontSize: 24,
+    color: PerlaColors.onSurface,
+  },
+  reubicarHeaderHint: {
+    fontFamily: 'Manrope',
+    fontSize: 12,
+    color: PerlaColors.onSurfaceVariant,
+    marginTop: 4,
+  },
+  reubicarCloseCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: PerlaColors.surfaceContainerHighest,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  reubicarCloseX: {
+    fontSize: 16,
+    color: PerlaColors.onSurfaceVariant,
+    fontWeight: 'bold',
+  },
+
+  /* Summary card */
+  reubicarSummaryCard: {
+    backgroundColor: PerlaColors.surfaceContainerLow,
+    borderRadius: 16,
+    padding: 14,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: PerlaColors.outlineVariant + '25',
+    borderLeftWidth: 3,
+    borderLeftColor: '#42A5F5',
+  },
+  reubicarSummaryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  reubicarSummaryIcon: {
+    fontSize: 22,
+  },
+  reubicarSummaryName: {
+    fontFamily: 'Manrope-Bold',
+    fontSize: 15,
+    color: PerlaColors.onSurface,
+  },
+  reubicarSummaryMeta: {
+    fontFamily: 'Manrope',
+    fontSize: 12,
+    color: PerlaColors.onSurfaceVariant,
+    marginTop: 2,
+  },
+  reubicarSummaryAmount: {
+    fontFamily: 'Newsreader-Bold',
+    fontSize: 20,
+    color: PerlaColors.tertiary,
+  },
+
+  /* Section label */
+  reubicarSectionLabel: {
+    fontFamily: 'Manrope-Bold',
+    fontSize: 11,
+    color: PerlaColors.onSurfaceVariant,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    marginBottom: 12,
+  },
+
+  /* Loading / Empty states */
+  reubicarLoadingText: {
+    fontFamily: 'Manrope',
+    fontSize: 14,
+    color: PerlaColors.onSurfaceVariant,
+    marginTop: 14,
+    textAlign: 'center',
+  },
+  reubicarEmptyIcon: {
+    fontSize: 48,
+    marginBottom: 12,
+  },
+  reubicarEmptyTitle: {
+    fontFamily: 'Newsreader-Bold',
+    fontSize: 20,
+    color: PerlaColors.onSurface,
+    marginBottom: 8,
+  },
+  reubicarEmptyText: {
+    fontFamily: 'Manrope',
+    fontSize: 14,
+    color: PerlaColors.onSurfaceVariant,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+
+  /* Trip cards */
+  reubicarTripCard: {
+    flexDirection: 'row',
+    borderRadius: 16,
+    backgroundColor: PerlaColors.surfaceContainerLow,
+    marginBottom: 10,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: PerlaColors.outlineVariant + '20',
+  },
+  reubicarTripCardDisabled: {
+    opacity: 0.35,
+  },
+  reubicarTripCardPressed: {
+    backgroundColor: PerlaColors.surfaceContainer,
+    borderColor: PerlaColors.tertiary + '50',
+  },
+  reubicarTripAccent: {
+    width: 4,
+    backgroundColor: PerlaColors.tertiary,
+  },
+  reubicarTripBody: {
+    flex: 1,
+    padding: 14,
+  },
+  reubicarTripTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 6,
+  },
+  reubicarTripTime: {
+    fontFamily: 'Newsreader-Bold',
+    fontSize: 20,
+    color: PerlaColors.onSurface,
+  },
+  reubicarTripStatusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  reubicarTripStatusText: {
+    fontFamily: 'Manrope-Bold',
+    fontSize: 9,
+    letterSpacing: 0.5,
+  },
+  reubicarTripSpotsText: {
+    fontFamily: 'Manrope-Bold',
+    fontSize: 13,
+    color: PerlaColors.tertiary,
+  },
+  reubicarTripBoat: {
+    fontFamily: 'Manrope-Medium',
+    fontSize: 13,
+    color: PerlaColors.onSurfaceVariant,
+    marginBottom: 8,
+  },
+
+  /* Capacity bar */
+  reubicarCapBarBg: {
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: PerlaColors.surfaceContainerHighest,
+    overflow: 'hidden',
+    marginBottom: 4,
+  },
+  reubicarCapBarFill: {
+    height: '100%',
+    borderRadius: 2,
+  },
+  reubicarCapLabel: {
+    fontFamily: 'Manrope',
+    fontSize: 10,
+    color: PerlaColors.onSurfaceVariant + '80',
+  },
+  reubicarTripWarn: {
+    fontFamily: 'Manrope-Medium',
+    fontSize: 11,
+    color: '#FFA726',
+    marginTop: 6,
+  },
+
+  /* Cancel button */
+  reubicarCancelBtn: {
+    paddingVertical: 14,
+    borderRadius: 14,
+    backgroundColor: PerlaColors.surfaceContainerHighest,
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  reubicarCancelText: {
+    fontFamily: 'Manrope-Bold',
+    fontSize: 14,
+    color: PerlaColors.onSurfaceVariant,
+  },
+
+  /* Saving overlay */
+  reubicarSavingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  reubicarSavingContent: {
+    alignItems: 'center',
+    gap: 16,
+  },
+  reubicarSavingText: {
+    fontFamily: 'Manrope-Bold',
+    fontSize: 16,
+    color: PerlaColors.onSurface,
+  },
+
+  /* Success overlay */
+  reubicarSuccessOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: PerlaColors.background + 'F5',
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  reubicarSuccessContent: {
+    alignItems: 'center',
+    paddingHorizontal: 32,
+  },
+  reubicarSuccessCircle: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: '#10B981' + '20',
+    borderWidth: 2,
+    borderColor: '#10B981',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 20,
+  },
+  reubicarSuccessCheck: {
+    fontSize: 32,
+    color: '#10B981',
+    fontWeight: 'bold',
+  },
+  reubicarSuccessTitle: {
+    fontFamily: 'Newsreader-Bold',
+    fontSize: 24,
+    color: PerlaColors.onSurface,
+    marginBottom: 6,
+  },
+  reubicarSuccessSubtitle: {
+    fontFamily: 'Manrope',
+    fontSize: 14,
+    color: PerlaColors.onSurfaceVariant,
+    marginBottom: 20,
+  },
+  reubicarSuccessDetail: {
+    backgroundColor: PerlaColors.surfaceContainerLow,
+    borderRadius: 14,
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: PerlaColors.tertiary + '30',
+    gap: 4,
+  },
+  reubicarSuccessTime: {
+    fontFamily: 'Newsreader-Bold',
+    fontSize: 22,
+    color: PerlaColors.tertiary,
+  },
+  reubicarSuccessBoat: {
+    fontFamily: 'Manrope-Medium',
+    fontSize: 13,
+    color: PerlaColors.onSurfaceVariant,
   },
 });

@@ -139,8 +139,8 @@ export default function VendedorWizardScreen() {
         .maybeSingle();
       
       if (data) {
-        if (!nombre) setNombre(data.nombre_completo);
-        if (!email && data.email) setEmail(data.email);
+        setNombre(data.nombre_completo);
+        if (data.email) setEmail(data.email);
         toast.success(`Cliente reconocido: ${data.nombre_completo}`);
       }
     }, 600);
@@ -149,24 +149,26 @@ export default function VendedorWizardScreen() {
   }, [telefono, lada]);
 
   /* ── Fetch Trips ──────────────────────────────────────── */
-  useEffect(() => {
-    (async () => {
-      const dateStr = getLocalDateString(selectedDate);
-      try {
-        const data = await obtenerViajesDelDia(dateStr);
-        setViajes(data as ViajeConEmb[]);
-        
-        const cupoResults = await Promise.all(
-          data.map(v => obtenerCupoViaje(v.id_viaje).then(c => ({ id: v.id_viaje, cupo: c })))
-        );
-        const m: Record<number, number> = {};
-        cupoResults.forEach(r => { m[r.id] = r.cupo; });
-        setCupos(m);
-      } catch (err) {
-        console.error('Error fetching trips:', err);
-      }
-    })();
+  const fetchTrips = useCallback(async () => {
+    const dateStr = getLocalDateString(selectedDate);
+    try {
+      const data = await obtenerViajesDelDia(dateStr);
+      setViajes(data as ViajeConEmb[]);
+
+      const cupoResults = await Promise.all(
+        data.map(v => obtenerCupoViaje(v.id_viaje).then(c => ({ id: v.id_viaje, cupo: c })))
+      );
+      const m: Record<number, number> = {};
+      cupoResults.forEach(r => { m[r.id] = r.cupo; });
+      setCupos(m);
+    } catch (err) {
+      console.error('Error fetching trips:', err);
+    }
   }, [selectedDate]);
+
+  useEffect(() => {
+    fetchTrips();
+  }, [fetchTrips]);
 
   /* ── Derived ───────────────────────────────────────────── */
   const personasNum = parseInt(personas) || 1;
@@ -329,6 +331,8 @@ export default function VendedorWizardScreen() {
       setPinGenerado(updated?.pin_verificacion || '------');
       setStep('confirmacion');
       toast.success('¡Venta Exitosa!');
+      // Refresh trip capacity so the list is up-to-date for the next sale
+      fetchTrips();
     } catch (err: any) {
       toast.error(err.message || 'Error al procesar la venta');
     } finally {

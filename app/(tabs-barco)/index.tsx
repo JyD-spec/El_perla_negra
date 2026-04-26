@@ -17,7 +17,8 @@ import {
   obtenerViajeActual, 
   actualizarEstadoViaje, 
   actualizarRegresoEstimado,
-  enviarAlertaPasajeros 
+  enviarAlertaPasajeros,
+  notificarRezagados,
 } from '@/src/services/viajes.service';
 import { obtenerReservacionesPorViaje } from '@/src/services/reservaciones.service';
 import type { ViajeConDetalles } from '@/src/lib/database.types';
@@ -121,10 +122,20 @@ export default function BarcoViajeScreen() {
     try {
       await actualizarRegresoEstimado(viaje.id_viaje, horas);
       
-      // Mandar aviso de zarpe
+      // Mandar aviso de zarpe a pasajeros a bordo
       try {
         await enviarAlertaPasajeros(viaje.id_viaje, `⛵ ¡El barco ha zarpado! Regresaremos en aproximadamente ${horas} horas.`);
-      } catch (e) { console.error('Error enviando alerta:', e); }
+      } catch (e) { console.error('Error enviando alerta de zarpe:', e); }
+
+      // Esperar a que el trigger DB (fn_vencer_pases_no_show) marque
+      // a los no-abordados como 'Vencido', luego notificar rezagados
+      const viajeId = viaje.id_viaje;
+      setTimeout(async () => {
+        try {
+          const result = await notificarRezagados(viajeId);
+          console.log('Rezagados notificados:', result);
+        } catch (e) { console.error('Error notificando rezagados:', e); }
+      }, 1500);
 
       await fetchData();
     } catch (err: any) {

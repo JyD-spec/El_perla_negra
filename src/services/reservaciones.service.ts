@@ -407,5 +407,12 @@ export async function reubicarReservacion(
     .single();
 
   if (error) throw error;
+
+  // Mark the original reservation as relocated so it's excluded from active filters
+  await supabase
+    .from('reservacion')
+    .update({ es_reubicacion: true })
+    .eq('id_reservacion', idOriginal);
+
   return data as Reservacion;
 }

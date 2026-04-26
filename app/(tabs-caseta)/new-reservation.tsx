@@ -34,16 +34,26 @@ import { obtenerCupoViaje, obtenerViajesDelDia } from '@/src/services/viajes.ser
 type ViajeConEmb = Viaje & { embarcacion: { nombre: string; capacidad_maxima: number } };
 type PaymentMethod = 'efectivo' | 'tarjeta' | 'transferencia';
 
-const GET_STATUS_STYLE = (status: EstadoViaje) => {
-  switch (status) {
-    case 'Finalizado': return { label: 'FINALIZADO', color: '#94a3b8', bg: '#1e293b', canReserve: false };
-    case 'Cancelado': return { label: 'CANCELADO', color: '#f87171', bg: '#450a0a', canReserve: false };
-    case 'En_Navegacion': return { label: 'EN NAVEGACIÓN', color: '#60a5fa', bg: '#172554', canReserve: false };
-    case 'Abordando': return { label: 'ACTIVO', color: '#fbbf24', bg: '#451a03', canReserve: true };
-    case 'Retrasado': return { label: 'RETRASADO', color: '#fb923c', bg: '#431407', canReserve: true };
-    case 'Programado': return { label: 'PROGRAMADO', color: '#34d399', bg: '#064e3b', canReserve: true };
-    default: return { label: String(status).toUpperCase(), color: '#94a3b8', bg: '#1e293b', canReserve: true };
-  }
+// Definimos el tipo para mantener el autocompletado estricto
+type StatusConfig = { label: string; color: string; bg: string; canReserve: boolean };
+
+const ESTILOS_VIAJE: Record<string, StatusConfig> = {
+  Finalizado: { label: 'FINALIZADO', color: '#94a3b8', bg: '#1e293b', canReserve: false }, // Slate: Neutro y apagado
+  Cancelado: { label: 'CANCELADO', color: '#f87171', bg: '#450a0a', canReserve: false }, // Red: Error claro
+  En_Navegacion: { label: 'EN NAVEGACIÓN', color: '#60a5fa', bg: '#172554', canReserve: false }, // Blue: Acción en progreso continuo
+  Abordando: { label: 'ACTIVO', color: '#c084fc', bg: '#3b0764', canReserve: true }, // Purple: Premium/Acción principal (Diferenciado del naranja)
+  Retrasado: { label: 'RETRASADO', color: '#fb923c', bg: '#431407', canReserve: true }, // Orange: Advertencia
+  Programado: { label: 'PROGRAMADO', color: '#34d399', bg: '#064e3b', canReserve: true }, // Emerald: Listo / Positivo
+};
+
+// Tu función ahora es solo un buscador directo (Lookup)
+const GET_STATUS_STYLE = (status: EstadoViaje): StatusConfig => {
+  return ESTILOS_VIAJE[status] || {
+    label: String(status).toUpperCase(),
+    color: '#94a3b8',
+    bg: '#1e293b',
+    canReserve: true
+  };
 };
 
 const DISCOUNT_THRESHOLD = 5;
@@ -79,8 +89,8 @@ export default function CasetaNewReservationScreen() {
   const [email, setEmail] = useState('');
   const [showCountryPicker, setShowCountryPicker] = useState(false);
   const [countrySearch, setCountrySearch] = useState('');
-  const [countries, setCountries] = useState<{name: string, code: string, flag: string, iso: string}[]>([]);
-  
+  const [countries, setCountries] = useState<{ name: string, code: string, flag: string, iso: string }[]>([]);
+
   /* ─── Filtering & Pagination ────────────────────────── */
   const [boatFilter, setBoatFilter] = useState('Todas');
   const [searchQuery, setSearchQuery] = useState('');
@@ -101,7 +111,7 @@ export default function CasetaNewReservationScreen() {
           }))
           .filter((c: any) => c.code)
           .sort((a: any, b: any) => a.name.localeCompare(b.name));
-        
+
         setCountries(list);
       } catch (err) {
         console.error('Error fetching countries:', err);
@@ -132,7 +142,7 @@ export default function CasetaNewReservationScreen() {
 
         setPaquetes(paqData.data || []);
         setAllDiscounts(descData || []);
-        
+
         if (params.paquete && paqData.data) {
           const p = paqData.data.find(x => x.descripcion.toLowerCase().includes(params.paquete!.toLowerCase()));
           if (p) setPackageSelections({ [p.id_paquete]: 1 });
@@ -168,7 +178,7 @@ export default function CasetaNewReservationScreen() {
       }
     })();
   }, [date]);
-  
+
   // Auto-recognize client by phone (debounced for flexible lengths)
   useEffect(() => {
     if (telefono.length < 8) return;
@@ -176,13 +186,13 @@ export default function CasetaNewReservationScreen() {
     const timer = setTimeout(async () => {
       // We try searching with and without LADA to support old records
       const fullPhone = `${lada}${telefono}`;
-      
+
       const { data } = await supabase
         .from('cliente')
         .select('nombre_completo, email')
         .or(`telefono.eq.${telefono},telefono.eq.${fullPhone}`)
         .maybeSingle();
-      
+
       if (data) {
         if (!nombre) setNombre(data.nombre_completo);
         if (!email && data.email) setEmail(data.email);
@@ -253,9 +263,9 @@ export default function CasetaNewReservationScreen() {
         setPackageSelections({ [paquetes[0].id_paquete]: personasNum });
       } else {
         // Find the first package with quantity > 0 to adjust, or just the first one
-        const firstId = Object.keys(packageSelections).find(id => packageSelections[Number(id)] > 0) 
-                        || paquetes[0].id_paquete.toString();
-        
+        const firstId = Object.keys(packageSelections).find(id => packageSelections[Number(id)] > 0)
+          || paquetes[0].id_paquete.toString();
+
         setPackageSelections(prev => {
           const newVal = Math.max(0, (prev[Number(firstId)] || 0) + diff);
           return { ...prev, [firstId]: newVal };
@@ -278,10 +288,10 @@ export default function CasetaNewReservationScreen() {
     // Find applicable discounts based on conditions
     const applicable = allDiscounts.filter(d => {
       if (!d.activo) return false;
-      
+
       // Rule: Minimum total tickets
       if (d.cantidad_minima_boletos && personasNum < d.cantidad_minima_boletos) return false;
-      
+
       // Rule: Specific package requirement
       if (d.id_paquete_condicion) {
         const qty = packageSelections[Number(d.id_paquete_condicion)] || 0;
@@ -318,21 +328,21 @@ export default function CasetaNewReservationScreen() {
   const adjustDate = (days: number) => {
     const newDate = new Date(date);
     newDate.setDate(newDate.getDate() + days);
-    
+
     // Validar que no sea anterior a hoy
     const today = new Date();
-    today.setHours(0,0,0,0);
+    today.setHours(0, 0, 0, 0);
     if (newDate < today) return;
-    
+
     setDate(newDate);
     setSelectedViaje(null);
   };
 
   const isToday = useMemo(() => {
     const today = new Date();
-    return date.getDate() === today.getDate() && 
-           date.getMonth() === today.getMonth() && 
-           date.getFullYear() === today.getFullYear();
+    return date.getDate() === today.getDate() &&
+      date.getMonth() === today.getMonth() &&
+      date.getFullYear() === today.getFullYear();
   }, [date]);
 
   const { initPaymentSheet, presentPaymentSheet } = useStripe();
@@ -463,7 +473,7 @@ export default function CasetaNewReservationScreen() {
         style={styles.root}
         contentContainerStyle={[
           styles.scrollContent,
-          { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 120 },
+          { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 160 },
         ]}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
@@ -487,7 +497,7 @@ export default function CasetaNewReservationScreen() {
         <View style={styles.fieldCard}>
           <Text style={styles.fieldLabel}>Teléfono (LADA + Número)</Text>
           <View style={{ flexDirection: 'row', gap: 8, marginTop: 4 }}>
-            <Pressable 
+            <Pressable
               style={[styles.textInput, { width: 95, justifyContent: 'center', alignItems: 'center', flexDirection: 'row', gap: 4 }]}
               onPress={() => setShowCountryPicker(true)}
             >
@@ -512,7 +522,7 @@ export default function CasetaNewReservationScreen() {
             placeholder="Nombre del cliente"
             placeholderTextColor={PerlaColors.onSurfaceVariant + '60'}
           />
-          
+
           <Text style={[styles.fieldLabel, { marginTop: 16 }]}>Email (para recibo)</Text>
           <TextInput
             style={styles.textInput}
@@ -532,15 +542,15 @@ export default function CasetaNewReservationScreen() {
         </View>
 
         <View style={styles.paymentMethods}>
-          <Pressable 
+          <Pressable
             style={[styles.paymentBtn, paymentMethod === 'efectivo' && styles.paymentBtnActive]}
             onPress={() => setPaymentMethod('efectivo')}
           >
             <Text style={[styles.paymentBtnText, paymentMethod === 'efectivo' && styles.paymentBtnTextActive]}>💵 Efectivo</Text>
           </Pressable>
-          
+
           {Platform.OS !== 'web' ? (
-            <Pressable 
+            <Pressable
               style={[styles.paymentBtn, paymentMethod === 'tarjeta' && styles.paymentBtnActive]}
               onPress={() => setPaymentMethod('tarjeta')}
             >
@@ -552,7 +562,7 @@ export default function CasetaNewReservationScreen() {
             </View>
           )}
 
-          <Pressable 
+          <Pressable
             style={[styles.paymentBtn, paymentMethod === 'transferencia' && styles.paymentBtnActive]}
             onPress={() => setPaymentMethod('transferencia')}
           >
@@ -602,10 +612,10 @@ export default function CasetaNewReservationScreen() {
                   <Text style={[styles.packageName, qty > 0 && styles.packageNameSelected]}>{pkg.descripcion}</Text>
                   <Text style={styles.packagePrice}>${pkg.costo_persona}</Text>
                 </View>
-                
+
                 <View style={styles.packageCounter}>
-                  <Pressable 
-                    style={styles.miniCounterBtn} 
+                  <Pressable
+                    style={styles.miniCounterBtn}
                     onPress={() => setPackageSelections(prev => ({
                       ...prev,
                       [pkg.id_paquete]: Math.max(0, (prev[pkg.id_paquete] || 0) - 1)
@@ -614,8 +624,8 @@ export default function CasetaNewReservationScreen() {
                     <Text style={styles.miniCounterText}>−</Text>
                   </Pressable>
                   <Text style={styles.packageQty}>{qty}</Text>
-                  <Pressable 
-                    style={styles.miniCounterBtn} 
+                  <Pressable
+                    style={styles.miniCounterBtn}
                     onPress={() => {
                       const currentTotal = Object.values(packageSelections).reduce((a, b) => a + b, 0);
                       if (currentTotal < personasNum) {
@@ -644,8 +654,8 @@ export default function CasetaNewReservationScreen() {
 
         <View style={styles.fieldCard}>
           <Text style={styles.fieldLabel}>DESCUENTO APLICADO</Text>
-          <Pressable 
-            style={styles.discountSelector} 
+          <Pressable
+            style={styles.discountSelector}
             onPress={() => setShowDiscountPicker(true)}
           >
             <View style={{ flex: 1 }}>
@@ -670,16 +680,16 @@ export default function CasetaNewReservationScreen() {
         </View>
 
         <View style={styles.dateSelectorRow}>
-          <Pressable 
-            style={[styles.dateArrow, isToday && { opacity: 0.3 }]} 
+          <Pressable
+            style={[styles.dateArrow, isToday && { opacity: 0.3 }]}
             onPress={() => adjustDate(-1)}
             disabled={isToday}
           >
             <Text style={styles.dateArrowText}>◀</Text>
           </Pressable>
 
-          <Pressable 
-            style={({ pressed }) => [styles.datePickerBtn, pressed && { opacity: 0.7 }]} 
+          <Pressable
+            style={({ pressed }) => [styles.datePickerBtn, pressed && { opacity: 0.7 }]}
             onPress={() => setShowDatePicker(true)}
           >
             <Text style={styles.dateText}>📅 {formatDate(date)}</Text>
@@ -735,8 +745,8 @@ export default function CasetaNewReservationScreen() {
                 key={v.id_viaje}
                 disabled={isDisabled}
                 style={[
-                  styles.tripItem, 
-                  isSelected && styles.tripItemSelected, 
+                  styles.tripItem,
+                  isSelected && styles.tripItemSelected,
                   isDisabled && { opacity: 0.5 }
                 ]}
                 onPress={() => setSelectedViaje(v)}
@@ -756,7 +766,7 @@ export default function CasetaNewReservationScreen() {
               </Pressable>
             );
           })}
-          
+
           {filteredViajes.length > pageSize && (
             <Pressable style={styles.moreBtn} onPress={() => setPageSize(prev => prev + 4)}>
               <Text style={styles.moreBtnText}>Ver más viajes (+4)</Text>
@@ -787,8 +797,8 @@ export default function CasetaNewReservationScreen() {
             <Text style={styles.summaryLab}>Total a Pagar</Text>
             <Text style={styles.summaryVal}>${total.toLocaleString()} MXN</Text>
           </View>
-          <Pressable 
-            style={[styles.confirmBtn, (saving || !selectedViaje) && { opacity: 0.6 }]} 
+          <Pressable
+            style={[styles.confirmBtn, (saving || !selectedViaje) && { opacity: 0.6 }]}
             onPress={handleReservar}
             disabled={saving || !selectedViaje}
           >
@@ -809,7 +819,7 @@ export default function CasetaNewReservationScreen() {
             </View>
 
             <ScrollView showsVerticalScrollIndicator={false}>
-              <Pressable 
+              <Pressable
                 style={[styles.discountItem, !selectedDiscount && styles.discountItemActive]}
                 onPress={() => {
                   setSelectedDiscount(null);
@@ -824,7 +834,7 @@ export default function CasetaNewReservationScreen() {
               </Pressable>
 
               {allDiscounts.filter(d => d.activo).map(d => (
-                <Pressable 
+                <Pressable
                   key={d.id_descuento}
                   style={[styles.discountItem, selectedDiscount?.id_descuento === d.id_descuento && styles.discountItemActive]}
                   onPress={() => {
@@ -846,8 +856,8 @@ export default function CasetaNewReservationScreen() {
                 </Pressable>
               ))}
             </ScrollView>
-            
-            <Pressable 
+
+            <Pressable
               style={styles.modalAutoBtn}
               onPress={() => {
                 setManualDiscountOverride(false);
@@ -870,7 +880,7 @@ export default function CasetaNewReservationScreen() {
                 <Text style={styles.modalClose}>✕</Text>
               </Pressable>
             </View>
-            
+
             <TextInput
               style={styles.modalSearch}
               placeholder="Buscar país..."
@@ -880,15 +890,15 @@ export default function CasetaNewReservationScreen() {
             />
 
             <FlatList
-              data={countries.filter(c => 
-                c.name.toLowerCase().includes(countrySearch.toLowerCase()) || 
+              data={countries.filter(c =>
+                c.name.toLowerCase().includes(countrySearch.toLowerCase()) ||
                 c.code.includes(countrySearch) ||
                 c.iso.toLowerCase().includes(countrySearch.toLowerCase())
               )}
               keyExtractor={(item) => item.name}
               showsVerticalScrollIndicator={false}
               renderItem={({ item }) => (
-                <Pressable 
+                <Pressable
                   style={styles.countryItem}
                   onPress={() => {
                     setLada(item.code);
@@ -919,7 +929,7 @@ const styles = StyleSheet.create({
   backBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: PerlaColors.surfaceContainerLow, alignItems: 'center', justifyContent: 'center' },
   screenTitle: { fontFamily: 'Newsreader-Bold', fontSize: 24, color: PerlaColors.onSurface },
   screenSubtitle: { fontFamily: 'Manrope', fontSize: 13, color: PerlaColors.onSurfaceVariant },
-  
+
   sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 20, marginBottom: 16 },
   sectionNumber: { width: 24, height: 24, borderRadius: 12, backgroundColor: PerlaColors.tertiary, alignItems: 'center', justifyContent: 'center' },
   sectionNumberText: { color: PerlaColors.onTertiary, fontSize: 12, fontWeight: 'bold' },
@@ -943,7 +953,7 @@ const styles = StyleSheet.create({
 
   datePickerBtn: { flex: 1, backgroundColor: PerlaColors.surfaceContainerLow, borderRadius: 12, padding: 14, alignItems: 'center', borderWidth: 1, borderColor: PerlaColors.outlineVariant },
   dateText: { fontFamily: 'Manrope-Bold', color: PerlaColors.onSurface, fontSize: 14 },
-  
+
   dateSelectorRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 16 },
   dateArrow: { width: 44, height: 48, borderRadius: 12, backgroundColor: PerlaColors.surfaceContainerLow, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: PerlaColors.outlineVariant },
   dateArrowText: { color: PerlaColors.tertiary, fontSize: 16 },
@@ -961,22 +971,22 @@ const styles = StyleSheet.create({
   summaryRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20 },
   summaryLab: { fontFamily: 'Manrope', fontSize: 14, color: PerlaColors.onSurfaceVariant },
   summaryVal: { fontFamily: 'Newsreader-Bold', fontSize: 24, color: PerlaColors.tertiary },
-  confirmBtn: { backgroundColor: PerlaColors.tertiary, padding: 18, borderRadius: 14, alignItems: 'center' },
-  confirmBtnText: { color: PerlaColors.onTertiary, fontWeight: 'bold', fontSize: 16 },
+  confirmBtn: { backgroundColor: PerlaColors.tertiary, paddingVertical: 18, paddingHorizontal: 24, borderRadius: 14, alignItems: 'center', marginTop: 16 },
+  confirmBtnText: { color: PerlaColors.onTertiary, fontWeight: 'bold', fontSize: 16, textAlign: 'center' },
 
   /* Payment Methods */
   paymentMethods: { flexDirection: 'row', gap: 8, marginBottom: 12, flexWrap: 'wrap' },
-  paymentBtn: { 
-    flex: 1, 
-    minWidth: '30%', 
-    paddingVertical: 14, 
-    paddingHorizontal: 8, 
-    borderRadius: 12, 
-    backgroundColor: PerlaColors.surfaceContainerLow, 
-    alignItems: 'center', 
+  paymentBtn: {
+    flex: 1,
+    minWidth: '30%',
+    paddingVertical: 14,
+    paddingHorizontal: 8,
+    borderRadius: 12,
+    backgroundColor: PerlaColors.surfaceContainerLow,
+    alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1, 
-    borderColor: 'transparent' 
+    borderWidth: 1,
+    borderColor: 'transparent'
   },
   paymentBtnActive: { borderColor: PerlaColors.tertiary, backgroundColor: PerlaColors.tertiary + '08' },
   paymentBtnText: { fontFamily: 'Manrope-Bold', color: PerlaColors.onSurfaceVariant, fontSize: 13, textAlign: 'center' },

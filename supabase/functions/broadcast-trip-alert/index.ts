@@ -19,13 +19,19 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
 
-    const { id_viaje, mensaje } = await req.json();
+    const { id_viaje, mensaje, target_rezagados } = await req.json();
 
     if (!id_viaje || !mensaje) {
       throw new Error('id_viaje y mensaje son requeridos');
     }
 
-    // 1. Obtener todas las reservaciones aprobadas para este viaje
+    // Build the filter based on whether we're targeting rezagados (Vencido)
+    // or normal broadcast (Aprobado / Pendiente_Caseta / Abordado)
+    const estadoFilter = target_rezagados
+      ? 'estado_pase.eq.Vencido'
+      : 'estado_pase.eq.Aprobado,estado_pase.eq.Pendiente_Caseta,estado_pase.eq.Abordado';
+
+    // 1. Obtener reservaciones según filtro
     const { data: reservaciones, error: resErr } = await supabase
       .from('reservacion')
       .select(`
@@ -33,15 +39,15 @@ serve(async (req) => {
         cliente ( nombre_completo, telefono, auth_id, push_token )
       `)
       .eq('id_viaje', id_viaje)
-      .or('estado_pase.eq.Aprobado,estado_pase.eq.Pendiente_Caseta');
+      .or(estadoFilter);
 
     if (resErr) throw resErr;
 
-    const results = [];
+    const results: any[] = [];
 
     // 2. Enviar avisos
-    for (const res of reservaciones) {
-      const cliente = res.cliente;
+    for (const res of (reservaciones || [])) {
+      const cliente = (res as any).cliente;
       if (!cliente) continue;
 
       if (cliente.push_token) {
@@ -57,7 +63,8 @@ serve(async (req) => {
             to: cliente.push_token,
             title: '⚓ Aviso El Perla Negra',
             body: mensaje,
-            data: { id_viaje },
+            sound: 'default',
+            data: { id_viaje, tipo: target_rezagados ? 'rezagado' : 'aviso' },
           }),
         });
         const pushData = await pushRes.json();

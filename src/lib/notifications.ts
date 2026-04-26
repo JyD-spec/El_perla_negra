@@ -9,10 +9,23 @@ Notifications.setNotificationHandler({
     shouldShowAlert: true,
     shouldPlaySound: true,
     shouldSetBadge: false,
+    shouldShowBanner: true,
+    shouldShowList: true,
   }),
 });
 
 export async function registerForPushNotificationsAsync() {
+  // Push notifications are not supported in Expo Go since SDK 53.
+  // Detect Expo Go: appOwnership === 'expo' or executionEnvironment === 'storeClient'.
+  const isExpoGo =
+    Constants.appOwnership === 'expo' ||
+    Constants.executionEnvironment === 'storeClient';
+
+  if (isExpoGo) {
+    console.warn('Push notifications are not available in Expo Go (SDK 53+). Use a development build.');
+    return null;
+  }
+
   if (!Device.isDevice) {
     console.log('Must use physical device for Push Notifications');
     return null;
@@ -31,7 +44,7 @@ export async function registerForPushNotificationsAsync() {
     return null;
   }
 
-  const projectId = Constants.expoConfig?.extra?.eas?.projectId ?? Constants.expoConfig?.projectId;
+  const projectId = (Constants.expoConfig?.extra?.eas?.projectId as string) ?? undefined;
   
   try {
     const token = (await Notifications.getExpoPushTokenAsync({ projectId })).data;

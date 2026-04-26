@@ -1039,6 +1039,7 @@ export default function CasetaMasterDashboard() {
             {(() => {
               const hist = historicalVendors.find(v => v.id_vendedor === selectedVendorId);
               const daily = statsData.vendorStatsArr?.find((v: any) => v.name === hist?.vendedor_nombre);
+              const dailyB = statsDataB?.vendorStatsArr?.find((v: any) => v.name === hist?.vendedor_nombre);
 
               if (!hist) return <Text style={styles.emptyText}>Selecciona un vendedor.</Text>;
 
@@ -1082,10 +1083,20 @@ export default function CasetaMasterDashboard() {
                     <View style={[styles.tile, { flex: 1 }]}>
                       <Text style={styles.miniRowLab}>Recaudado</Text>
                       <Text style={[styles.heroVal, { color: PerlaColors.tertiary }]}>${(daily?.ingresos || 0).toLocaleString()}</Text>
+                      {isComparing && (
+                        <Text style={[styles.barVal, { fontSize: 12, color: PerlaColors.secondary, marginTop: 4 }]}>
+                          vs ${(dailyB?.ingresos || 0).toLocaleString()}
+                        </Text>
+                      )}
                     </View>
                     <View style={[styles.tile, { flex: 1 }]}>
                       <Text style={styles.miniRowLab}>Boletos</Text>
                       <Text style={styles.heroVal}>{daily?.tickets || 0}</Text>
+                      {isComparing && (
+                        <Text style={[styles.barVal, { fontSize: 12, color: PerlaColors.secondary, marginTop: 4 }]}>
+                          vs {dailyB?.tickets || 0}
+                        </Text>
+                      )}
                     </View>
                   </View>
                   {daily && (
@@ -1119,6 +1130,7 @@ export default function CasetaMasterDashboard() {
             {(() => {
               const hist = historicalBoats.find(b => b.id_embarcacion === selectedBoatId);
               const daily = statsData.boatStatsArr?.find((b: any) => b.name === hist?.barco_nombre);
+              const dailyB = statsDataB?.boatStatsArr?.find((b: any) => b.name === hist?.barco_nombre);
 
               if (!hist) return <Text style={styles.emptyText}>Selecciona un barco.</Text>;
 
@@ -1169,10 +1181,20 @@ export default function CasetaMasterDashboard() {
                     <View style={[styles.tile, { flex: 1 }]}>
                       <Text style={styles.miniRowLab}>Recaudado</Text>
                       <Text style={[styles.heroVal, { color: PerlaColors.tertiary }]}>${(daily?.ingresos || 0).toLocaleString()}</Text>
+                      {isComparing && (
+                        <Text style={[styles.barVal, { fontSize: 12, color: PerlaColors.secondary, marginTop: 4 }]}>
+                          vs ${(dailyB?.ingresos || 0).toLocaleString()}
+                        </Text>
+                      )}
                     </View>
                     <View style={[styles.tile, { flex: 1 }]}>
                       <Text style={styles.miniRowLab}>Tickets Vendidos</Text>
                       <Text style={styles.heroVal}>{daily?.tickets || 0}</Text>
+                      {isComparing && (
+                        <Text style={[styles.barVal, { fontSize: 12, color: PerlaColors.secondary, marginTop: 4 }]}>
+                          vs {dailyB?.tickets || 0}
+                        </Text>
+                      )}
                     </View>
                   </View>
                 </View>

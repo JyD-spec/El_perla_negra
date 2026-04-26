@@ -146,7 +146,7 @@ export default function DiscountsCatalogScreen() {
               <View style={styles.cardActions}>
                 <View style={[styles.activeIndicator, { backgroundColor: d.activo ? '#66BB6A' : '#EF5350' }]} />
                 <Pressable onPress={(e) => { e.stopPropagation(); handleDeleteFromList(d); }} style={styles.deleteListBtn}>
-                  <IconSymbol name="trash.fill" size={20} color={PerlaColors.error} />
+                  <IconSymbol name="trash.fill" size={16} color={PerlaColors.error} />
                 </Pressable>
               </View>
             </Pressable>
@@ -326,8 +326,8 @@ const styles = StyleSheet.create({
   cardPct: { fontFamily: 'Newsreader-Bold', fontSize: 20, color: PerlaColors.tertiary },
   cardLogic: { fontFamily: 'Manrope-Medium', fontSize: 12, color: PerlaColors.onSurfaceVariant, marginBottom: 2 },
   cardCondition: { fontFamily: 'Manrope', fontSize: 11, color: PerlaColors.tertiary, fontStyle: 'italic' },
-  activeIndicator: { width: 4, height: '100%', borderRadius: 2, marginLeft: 16 },
-  cardActions: { alignItems: 'flex-end', gap: 12 },
+  activeIndicator: { width: 8, height: 8, borderRadius: 4 },
+  cardActions: { alignItems: 'center', justifyContent: 'space-between', gap: 14, paddingVertical: 2, marginLeft: 14 },
   
   emptyState: { padding: 40, alignItems: 'center' },
   emptyIcon: { fontSize: 48, marginBottom: 16 },

@@ -200,6 +200,22 @@ export async function enviarAlertaPasajeros(idViaje: number, mensaje: string) {
   return data;
 }
 
+/**
+ * Notificar a pasajeros rezagados (Vencido) que deben acudir a reubicación.
+ * Se usa después de que el barco zarpa y el trigger DB marca a los no-abordados.
+ */
+export async function notificarRezagados(idViaje: number) {
+  const { data, error } = await supabase.functions.invoke('broadcast-trip-alert', {
+    body: {
+      id_viaje: idViaje,
+      mensaje: '🚨 El barco ya zarpó. Por favor, dirígete a la caseta de atención para solicitar tu reubicación.',
+      target_rezagados: true,
+    },
+  });
+  if (error) throw error;
+  return data;
+}
+
 export async function obtenerTendenciasSemanales() {
   const hoy = new Date();
   const hace7dias = new Date(hoy);
